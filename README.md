@@ -7,7 +7,7 @@
 ### **README (`README.md`)**
 Here's a well-structured **README** file with emojis and a p5.js vibe:  
 
-```md
+
 # 🎨 Awesome p5.js Prompts 🚀  
 
 A curated collection of **creative prompts** for **p5.js**, helping you explore generative art, physics simulations, interactive animations, and more! 🖌️✨  
