@@ -1,0 +1,325 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Interactive Fluid Simulation</title>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/p5.js/1.4.0/p5.min.js"></script>
+  <style>
+    body {
+      margin: 0;
+      padding: 0;
+      overflow: hidden;
+      background-color: #000;
+    }
+    canvas {
+      display: block;
+    }
+  </style>
+</head>
+<body>
+  <script>
+    // Fluid Simulation based on Jos Stam's "Real-Time Fluid Dynamics for Games"
+    // Adapted for P5.js with interactive elements
+    
+    let N = 64; // grid size
+    let iter = 16; // solver iterations
+    
+    // Arrays for simulation
+    let size;
+    let dt = 0.1;
+    let diff = 0.0001; // diffusion
+    let visc = 0.00001; // viscosity
+    
+    let s; // density
+    let density;
+    
+    let Vx; // velocity x
+    let Vy; // velocity y
+    
+    let Vx0; // previous velocity x
+    let Vy0; // previous velocity y
+    
+    let hue = 0;
+    let colorMode = 0;
+    let colorSpeed = 1;
+    
+    function setup() {
+      createCanvas(windowWidth, windowHeight);
+      colorMode = Math.floor(random(3));
+      colorSpeed = random(0.5, 2);
+      
+      // Initialize simulation
+      size = N + 2;
+      
+      // Initialize arrays
+      s = new Array(size * size).fill(0);
+      density = new Array(size * size).fill(0);
+      
+      Vx = new Array(size * size).fill(0);
+      Vy = new Array(size * size).fill(0);
+      
+      Vx0 = new Array(size * size).fill(0);
+      Vy0 = new Array(size * size).fill(0);
+      
+      noStroke();
+      background(0);
+    }
+    
+    function draw() {
+      // Add velocity based on mouse movement
+      if (mouseIsPressed) {
+        let mouseXCell = Math.floor((mouseX / width) * N) + 1;
+        let mouseYCell = Math.floor((mouseY / height) * N) + 1;
+        
+        if (mouseXCell > 0 && mouseXCell < N + 1 && mouseYCell > 0 && mouseYCell < N + 1) {
+          // Calculate mouse velocity
+          let dmouseX = mouseX - pmouseX;
+          let dmouseY = mouseY - pmouseY;
+          
+          // Add velocity at mouse position
+          addVelocity(mouseXCell, mouseYCell, dmouseX * 0.2, dmouseY * 0.2);
+          
+          // Add density at mouse position
+          addDensity(mouseXCell, mouseYCell, 100);
+        }
+      }
+      
+      // Update simulation
+      velocityStep();
+      densityStep();
+      
+      // Update color
+      hue += 0.5 * colorSpeed;
+      if (hue > 360) hue = 0;
+      
+      // Render fluid
+      renderFluid();
+      
+      // Display instructions
+      fill(255);
+      textSize(16);
+      text("Click and drag to interact with the fluid", 20, 30);
+      text("Press 'c' to change color mode", 20, 55);
+      text("Press 'r' to reset", 20, 80);
+    }
+    
+    function keyPressed() {
+      if (key === 'c') {
+        colorMode = (colorMode + 1) % 3;
+      }
+      if (key === 'r') {
+        resetSimulation();
+      }
+    }
+    
+    function resetSimulation() {
+      // Reset all arrays
+      s.fill(0);
+      density.fill(0);
+      Vx.fill(0);
+      Vy.fill(0);
+      Vx0.fill(0);
+      Vy0.fill(0);
+      background(0);
+    }
+    
+    function windowResized() {
+      resizeCanvas(windowWidth, windowHeight);
+      background(0);
+    }
+    
+    function addDensity(x, y, amount) {
+      let index = IX(x, y);
+      s[index] += amount;
+    }
+    
+    function addVelocity(x, y, amountX, amountY) {
+      let index = IX(x, y);
+      Vx[index] += amountX;
+      Vy[index] += amountY;
+    }
+    
+    function renderFluid() {
+      // Semi-transparent background for trail effect
+      fill(0, 20);
+      rect(0, 0, width, height);
+      
+      // Calculate cell size
+      let cellWidth = width / N;
+      let cellHeight = height / N;
+      
+      for (let i = 1; i <= N; i++) {
+        for (let j = 1; j <= N; j++) {
+          let x = (i - 0.5) * cellWidth;
+          let y = (j - 0.5) * cellHeight;
+          
+          let d = density[IX(i, j)];
+          
+          if (d > 0.1) {
+            // Different color modes
+            switch (colorMode) {
+              case 0: // Rainbow
+                fill(hue % 360, 100, 100, d * 2);
+                break;
+              case 1: // Blue-purple gradient
+                fill(240 + (d * 0.5) % 60, 100, 100, d * 2);
+                break;
+              case 2: // Fire colors
+                fill(60 - min(d * 0.5, 30), 100, 100, d * 2);
+                break;
+            }
+            
+            // Draw velocity vectors
+            let vx = Vx[IX(i, j)];
+            let vy = Vy[IX(i, j)];
+            let speed = Math.sqrt(vx * vx + vy * vy);
+            
+            // Draw particle based on velocity and density
+            let particleSize = map(d, 0, 100, 1, cellWidth * 1.5);
+            let particleX = x + vx * 0.5;
+            let particleY = y + vy * 0.5;
+            
+            colorMode === 0 ? 
+              ellipse(particleX, particleY, particleSize, particleSize) :
+              rect(particleX - particleSize/2, particleY - particleSize/2, particleSize, particleSize);
+          }
+        }
+      }
+    }
+    
+    // Simulation steps
+    function velocityStep() {
+      // Add forces
+      diffuse(1, Vx0, Vx, visc);
+      diffuse(2, Vy0, Vy, visc);
+      
+      // Project to make velocity field mass-conserving
+      project(Vx0, Vy0, Vx, Vy);
+      
+      // Advection
+      advect(1, Vx, Vx0, Vx0, Vy0);
+      advect(2, Vy, Vy0, Vx0, Vy0);
+      
+      // Project again
+      project(Vx, Vy, Vx0, Vy0);
+    }
+    
+    function densityStep() {
+      // Diffuse density
+      diffuse(0, density, s, diff);
+      
+      // Advect density
+      advect(0, s, density, Vx, Vy);
+      
+      // Fade out density slowly
+      for (let i = 0; i < size * size; i++) {
+        s[i] *= 0.99;
+      }
+    }
+    
+    // Helper function to get 1D array index from 2D coordinates
+    function IX(x, y) {
+      return x + y * size;
+    }
+    
+    // Core fluid simulation functions
+    function diffuse(b, x, x0, diff) {
+      let a = dt * diff * N * N;
+      linearSolve(b, x, x0, a, 1 + 4 * a);
+    }
+    
+    function linearSolve(b, x, x0, a, c) {
+      let cRecip = 1.0 / c;
+      for (let k = 0; k < iter; k++) {
+        for (let j = 1; j <= N; j++) {
+          for (let i = 1; i <= N; i++) {
+            x[IX(i, j)] = (x0[IX(i, j)] + a * (
+              x[IX(i+1, j)] + x[IX(i-1, j)] + 
+              x[IX(i, j+1)] + x[IX(i, j-1)]
+            )) * cRecip;
+          }
+        }
+        setBoundary(b, x);
+      }
+    }
+    
+    function project(velocX, velocY, p, div) {
+      for (let j = 1; j <= N; j++) {
+        for (let i = 1; i <= N; i++) {
+          div[IX(i, j)] = -0.5 * (
+            velocX[IX(i+1, j)] - velocX[IX(i-1, j)] + 
+            velocY[IX(i, j+1)] - velocY[IX(i, j-1)]
+          ) / N;
+          p[IX(i, j)] = 0;
+        }
+      }
+      
+      setBoundary(0, div);
+      setBoundary(0, p);
+      linearSolve(0, p, div, 1, 4);
+      
+      for (let j = 1; j <= N; j++) {
+        for (let i = 1; i <= N; i++) {
+          velocX[IX(i, j)] -= 0.5 * (p[IX(i+1, j)] - p[IX(i-1, j)]) * N;
+          velocY[IX(i, j)] -= 0.5 * (p[IX(i, j+1)] - p[IX(i, j-1)]) * N;
+        }
+      }
+      
+      setBoundary(1, velocX);
+      setBoundary(2, velocY);
+    }
+    
+    function advect(b, d, d0, velocX, velocY) {
+      let i0, i1, j0, j1;
+      let x, y, s0, t0, s1, t1, dt0;
+      
+      dt0 = dt * N;
+      
+      for (let j = 1; j <= N; j++) {
+        for (let i = 1; i <= N; i++) {
+          x = i - dt0 * velocX[IX(i, j)];
+          y = j - dt0 * velocY[IX(i, j)];
+          
+          if (x < 0.5) x = 0.5;
+          if (x > N + 0.5) x = N + 0.5;
+          i0 = Math.floor(x);
+          i1 = i0 + 1;
+          
+          if (y < 0.5) y = 0.5;
+          if (y > N + 0.5) y = N + 0.5;
+          j0 = Math.floor(y);
+          j1 = j0 + 1;
+          
+          s1 = x - i0;
+          s0 = 1 - s1;
+          t1 = y - j0;
+          t0 = 1 - t1;
+          
+          d[IX(i, j)] = 
+            s0 * (t0 * d0[IX(i0, j0)] + t1 * d0[IX(i0, j1)]) +
+            s1 * (t0 * d0[IX(i1, j0)] + t1 * d0[IX(i1, j1)]);
+        }
+      }
+      
+      setBoundary(b, d);
+    }
+    
+    function setBoundary(b, x) {
+      // Handle boundaries
+      for (let i = 1; i <= N; i++) {
+        x[IX(0, i)] = b === 1 ? -x[IX(1, i)] : x[IX(1, i)];
+        x[IX(N+1, i)] = b === 1 ? -x[IX(N, i)] : x[IX(N, i)];
+        x[IX(i, 0)] = b === 2 ? -x[IX(i, 1)] : x[IX(i, 1)];
+        x[IX(i, N+1)] = b === 2 ? -x[IX(i, N)] : x[IX(i, N)];
+      }
+      
+      // Handle corners
+      x[IX(0, 0)] = 0.5 * (x[IX(1, 0)] + x[IX(0, 1)]);
+      x[IX(0, N+1)] = 0.5 * (x[IX(1, N+1)] + x[IX(0, N)]);
+      x[IX(N+1, 0)] = 0.5 * (x[IX(N, 0)] + x[IX(N+1, 1)]);
+      x[IX(N+1, N+1)] = 0.5 * (x[IX(N, N+1)] + x[IX(N+1, N)]);
+    }
+  </script>
+</body>
+</html>
