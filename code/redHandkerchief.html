@@ -1,0 +1,532 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Floating Satin Handkerchief Simulation - Debug Mode</title>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/p5.js/1.6.0/p5.js"></script>
+  <style>
+    body {
+      margin: 0;
+      padding: 0;
+      overflow: hidden;
+      background-color: #222;
+    }
+    canvas {
+      display: block;
+    }
+    #debug-panel {
+      position: absolute;
+      top: 10px;
+      left: 10px;
+      background-color: rgba(0, 0, 0, 0.7);
+      color: white;
+      padding: 10px;
+      font-family: monospace;
+      border-radius: 5px;
+      z-index: 100;
+      max-width: 300px;
+    }
+    .debug-control {
+      margin-bottom: 5px;
+    }
+    button {
+      margin-right: 5px;
+      margin-bottom: 5px;
+    }
+  </style>
+</head>
+<body>
+  <div id="debug-panel">
+    <h3>Debug Controls</h3>
+    <div class="debug-control">
+      <button id="toggle-debug">Toggle Debug View</button>
+      <button id="reset-cloth">Reset Cloth</button>
+    </div>
+    <div class="debug-control">
+      <label>Breeze Strength: <span id="breeze-value">0.5</span></label>
+      <input type="range" id="breeze-slider" min="0" max="2" step="0.1" value="0.5">
+    </div>
+    <div class="debug-control">
+      <label>Restore Force: <span id="restore-value">0.05</span></label>
+      <input type="range" id="restore-slider" min="0" max="0.2" step="0.01" value="0.05">
+    </div>
+    <div class="debug-control">
+      <label>Damping: <span id="damping-value">0.98</span></label>
+      <input type="range" id="damping-slider" min="0.9" max="0.999" step="0.001" value="0.98">
+    </div>
+    <div class="debug-control">
+      <label>Light Angle (degrees): <span id="light-value">60</span></label>
+      <input type="range" id="light-slider" min="0" max="90" step="1" value="60">
+    </div>
+    <div class="debug-control">
+      <label>Pixel Density: <span id="density-value">2</span></label>
+      <input type="range" id="density-slider" min="1" max="4" step="1" value="2">
+    </div>
+    <div id="fps-counter">FPS: --</div>
+    <div id="particles-info">Particles: --</div>
+    <div id="mouse-info">Mouse: --</div>
+  </div>
+
+  <script>
+    // Cloth simulation parameters
+    const CLOTH_SIZE = 300;
+    const GRID_SIZE = 30; // Increased from 15 to 30 for higher polygon density
+    const SPACING = CLOTH_SIZE / GRID_SIZE;
+    const ITERATIONS = 20; // Increased from 15 to 20 for better stability with higher density
+    
+    // Parameters that can be adjusted in debug mode
+    let BREEZE_STRENGTH = 0.5;
+    let RESTORE_FORCE = 0.05;
+    let DAMPING = 0.98;
+    let LIGHT_INTENSITY = 180;
+    
+    let particles = [];
+    let constraints = [];
+    let time = 0;
+    let lightAngle = Math.PI / 3; // 60 degrees in radians
+    
+    // Debug variables
+    let showDebug = false;
+    let frameRateValues = [];
+    let lastMousePos = { x: 0, y: 0 };
+    
+    function setup() {
+      createCanvas(windowWidth, windowHeight, WEBGL);
+      pixelDensity(2);
+      
+      setupUI();
+      initializeCloth();
+    }
+    
+    function initializeCloth() {
+      // Clear existing particles and constraints
+      particles = [];
+      constraints = [];
+      
+      // Create cloth particles
+      for (let y = 0; y < GRID_SIZE; y++) {
+        for (let x = 0; x < GRID_SIZE; x++) {
+          let particle = {
+            pos: createVector(
+              x * SPACING - CLOTH_SIZE / 2, 
+              y * SPACING - CLOTH_SIZE / 2, 
+              0
+            ),
+            oldPos: createVector(
+              x * SPACING - CLOTH_SIZE / 2, 
+              y * SPACING - CLOTH_SIZE / 2, 
+              0
+            ),
+            originalPos: createVector(
+              x * SPACING - CLOTH_SIZE / 2, 
+              y * SPACING - CLOTH_SIZE / 2, 
+              0
+            ),
+            vel: createVector(0, 0, 0),
+            pinned: false,
+            forces: createVector(0, 0, 0)
+          };
+          particles.push(particle);
+        }
+      }
+      
+      // Create constraints (connections between particles)
+      for (let y = 0; y < GRID_SIZE; y++) {
+        for (let x = 0; x < GRID_SIZE; x++) {
+          let i = y * GRID_SIZE + x;
+          
+          // Horizontal constraints
+          if (x < GRID_SIZE - 1) {
+            constraints.push([i, i + 1, SPACING]);
+          }
+          
+          // Vertical constraints
+          if (y < GRID_SIZE - 1) {
+            constraints.push([i, i + GRID_SIZE, SPACING]);
+          }
+          
+          // Diagonal constraints for more stability
+          if (x < GRID_SIZE - 1 && y < GRID_SIZE - 1) {
+            constraints.push([i, i + GRID_SIZE + 1, SPACING * sqrt(2)]);
+            constraints.push([i + 1, i + GRID_SIZE, SPACING * sqrt(2)]);
+          }
+        }
+      }
+      
+      // Update UI
+      updateParticlesInfo();
+    }
+    
+    function setupUI() {
+      // Set up event listeners for debug controls
+      select('#toggle-debug').mousePressed(() => {
+        showDebug = !showDebug;
+      });
+      
+      select('#reset-cloth').mousePressed(() => {
+        initializeCloth();
+      });
+      
+      select('#breeze-slider').input(() => {
+        BREEZE_STRENGTH = parseFloat(select('#breeze-slider').value());
+        select('#breeze-value').html(BREEZE_STRENGTH.toFixed(1));
+      });
+      
+      select('#restore-slider').input(() => {
+        RESTORE_FORCE = parseFloat(select('#restore-slider').value());
+        select('#restore-value').html(RESTORE_FORCE.toFixed(2));
+      });
+      
+      select('#damping-slider').input(() => {
+        DAMPING = parseFloat(select('#damping-slider').value());
+        select('#damping-value').html(DAMPING.toFixed(3));
+      });
+      
+      select('#light-slider').input(() => {
+        let angleDegrees = parseInt(select('#light-slider').value());
+        select('#light-value').html(angleDegrees);
+        lightAngle = radians(angleDegrees);
+      });
+      
+      select('#density-slider').input(() => {
+        let density = parseInt(select('#density-slider').value());
+        select('#density-value').html(density);
+        pixelDensity(density);
+        
+        // Add warning for high density values which might affect performance
+        if (density > 2) {
+          select('#density-value').style('color', 'orange');
+        } else {
+          select('#density-value').style('color', 'white');
+        }
+      });
+    }
+    
+    function draw() {
+      background(30);
+      
+      // Track frame rate for debugging
+      updateFPSCounter();
+      
+      // Smooth camera movement
+      let camX = sin(frameCount * 0.005) * 100;
+      let camY = sin(frameCount * 0.003) * 50;
+      camera(camX, camY, 500, 0, 0, 0, 0, 1, 0);
+      
+      // Set up lighting
+      ambientLight(60);
+      
+      // Convert light angle properly for 60 degrees in xyz
+      let angleInRadians = lightAngle;
+      let lx = sin(angleInRadians) * cos(angleInRadians);
+      let ly = sin(angleInRadians) * sin(angleInRadians);
+      let lz = cos(angleInRadians);
+      
+      // Directional light
+      directionalLight(255, 255, 230, lx, ly, lz);
+      
+      // Add some fill light to see the cloth better
+      directionalLight(70, 70, 100, -lx, -ly, -lz);
+      
+      // Point light to enhance satin effect
+      pointLight(220, 200, 200, 200 * sin(frameCount * 0.01), -100, 300);
+      
+      // Apply physics
+      updateParticles();
+      applyConstraints();
+      
+      // Draw cloth
+      if (showDebug) {
+        drawDebugView();
+      } else {
+        drawCloth();
+      }
+      
+      // Increment time
+      time += 0.01;
+      
+      // Update mouse info
+      updateMouseInfo();
+    }
+    
+    function updateParticles(timeStep = 1.0) {
+      for (let i = 0; i < particles.length; i++) {
+        let p = particles[i];
+        
+        if (p.pinned) continue;
+        
+        // Reset forces
+        p.forces = createVector(0, 0, 0);
+        
+        // Save current position
+        p.oldPos.set(p.pos);
+        
+        // Apply velocity (verlet integration)
+        p.vel.set(
+          p.pos.x - p.oldPos.x,
+          p.pos.y - p.oldPos.y,
+          p.pos.z - p.oldPos.z
+        );
+        
+        // Apply damping
+        p.vel.mult(DAMPING);
+        
+        // Calculate forces
+        
+        // Gravity (very light for floating effect)
+        p.forces.y += 0.02;
+        
+        // Breeze effect - gentle random movements
+        let breezeX = (noise(i * 0.1, time * 0.5) * 2 - 1) * BREEZE_STRENGTH;
+        let breezeY = (noise(i * 0.1, time * 0.5 + 100) * 2 - 1) * BREEZE_STRENGTH;
+        let breezeZ = (noise(i * 0.1, time * 0.5 + 200) * 2 - 1) * BREEZE_STRENGTH * 2;
+        let breeze = createVector(breezeX, breezeY, breezeZ);
+        p.forces.add(breeze);
+        
+        // Central force to keep cloth centered
+        let toCenter = createVector(-p.pos.x * 0.01, -p.pos.y * 0.01, -p.pos.z * 0.02);
+        p.forces.add(toCenter);
+        
+        // Restore force to original shape
+        let toOriginal = p5.Vector.sub(p.originalPos, p.pos);
+        toOriginal.mult(RESTORE_FORCE);
+        p.forces.add(toOriginal);
+        
+        // Floating sine wave motion
+        let floatZ = sin(time + i * 0.05) * 0.3;
+        p.forces.z += floatZ;
+        
+        // Apply all forces to velocity
+        p.vel.add(p.forces);
+        
+        // Update position
+        p.pos.add(p.vel);
+      }
+    }
+    
+    function applyConstraints() {
+      // Solve constraints multiple times for stability
+      for (let iter = 0; iter < ITERATIONS; iter++) {
+        for (let i = 0; i < constraints.length; i++) {
+          let [a, b, restLength] = constraints[i];
+          
+          let p1 = particles[a];
+          let p2 = particles[b];
+          
+          if (p1.pinned && p2.pinned) continue;
+          
+          let delta = p5.Vector.sub(p2.pos, p1.pos);
+          let currentDist = delta.mag();
+          
+          // Avoid division by zero
+          if (currentDist === 0) continue;
+          
+          let diff = (currentDist - restLength) / currentDist;
+          
+          // Adjust positions to maintain constraint
+          if (!p1.pinned && !p2.pinned) {
+            p1.pos.add(delta.copy().mult(0.5 * diff));
+            p2.pos.sub(delta.copy().mult(0.5 * diff));
+          } else if (!p1.pinned) {
+            p1.pos.add(delta.copy().mult(diff));
+          } else if (!p2.pinned) {
+            p2.pos.sub(delta.copy().mult(diff));
+          }
+        }
+      }
+    }
+    
+    function drawCloth() {
+      // Draw triangles for cloth - using individual triangles for a complete surface
+      noStroke();
+      specularMaterial(170, 50, 70); // Light maroon
+      shininess(100); // Satin-like effect
+      
+      // Draw the cloth as a continuous mesh of triangles
+      beginShape(TRIANGLES);
+      
+      for (let y = 0; y < GRID_SIZE - 1; y++) {
+        for (let x = 0; x < GRID_SIZE - 1; x++) {
+          let idx = y * GRID_SIZE + x;
+          let idx_right = idx + 1;
+          let idx_down = (y + 1) * GRID_SIZE + x;
+          let idx_down_right = idx_down + 1;
+          
+          // Get the four corners of this grid cell
+          let pos = particles[idx].pos;
+          let pos_right = particles[idx_right].pos;
+          let pos_down = particles[idx_down].pos;
+          let pos_down_right = particles[idx_down_right].pos;
+          
+          // Create two triangles for this grid cell
+          // Triangle 1: top-left, bottom-left, bottom-right
+          let v1 = p5.Vector.sub(pos_down, pos);
+          let v2 = p5.Vector.sub(pos_right, pos);
+          let normal1 = p5.Vector.cross(v1, v2).normalize();
+          
+          normal(normal1.x, normal1.y, normal1.z);
+          vertex(pos.x, pos.y, pos.z);
+          vertex(pos_down.x, pos_down.y, pos_down.z);
+          vertex(pos_right.x, pos_right.y, pos_right.z);
+          
+          // Triangle 2: bottom-left, bottom-right, top-right
+          let v3 = p5.Vector.sub(pos_down_right, pos_down);
+          let v4 = p5.Vector.sub(pos_right, pos_down);
+          let normal2 = p5.Vector.cross(v3, v4).normalize();
+          
+          normal(normal2.x, normal2.y, normal2.z);
+          vertex(pos_down.x, pos_down.y, pos_down.z);
+          vertex(pos_down_right.x, pos_down_right.y, pos_down_right.z);
+          vertex(pos_right.x, pos_right.y, pos_right.z);
+        }
+      }
+      
+      endShape();
+    }
+    
+    function drawDebugView() {
+      // Draw wireframe and forces
+      stroke(255);
+      noFill();
+      
+      // Draw constraints
+      for (let i = 0; i < constraints.length; i++) {
+        let [a, b] = constraints[i];
+        let p1 = particles[a].pos;
+        let p2 = particles[b].pos;
+        
+        // Color based on stress
+        let idealDist = constraints[i][2];
+        let currentDist = p5.Vector.dist(p1, p2);
+        let stress = map(abs(currentDist - idealDist), 0, 10, 0, 1);
+        
+        if (stress > 0.5) {
+          stroke(255, 0, 0, 200); // Red for high stress
+        } else {
+          stroke(0, 255, 0, 200); // Green for low stress
+        }
+        
+        line(p1.x, p1.y, p1.z, p2.x, p2.y, p2.z);
+      }
+      
+      // Draw particles
+      for (let i = 0; i < particles.length; i++) {
+        let p = particles[i];
+        
+        push();
+        translate(p.pos.x, p.pos.y, p.pos.z);
+        
+        // Particle
+        noStroke();
+        fill(255);
+        sphere(2);
+        
+        // Force vector
+        if (p.forces && p.forces.mag() > 0.01) {
+          stroke(255, 255, 0);
+          let forceDir = p.forces.copy().normalize().mult(10);
+          line(0, 0, 0, forceDir.x, forceDir.y, forceDir.z);
+        }
+        
+        // Velocity vector
+        if (p.vel && p.vel.mag() > 0.01) {
+          stroke(0, 255, 255);
+          let velDir = p.vel.copy().normalize().mult(5);
+          line(0, 0, 0, velDir.x, velDir.y, velDir.z);
+        }
+        
+        pop();
+      }
+      
+      // Draw light direction
+      push();
+      stroke(255, 255, 0);
+      let lightDir = createVector(
+        sin(lightAngle) * cos(lightAngle),
+        sin(lightAngle) * sin(lightAngle),
+        cos(lightAngle)
+      ).mult(100);
+      line(0, 0, 0, lightDir.x, lightDir.y, lightDir.z);
+      pop();
+    }
+    
+    function mousePressed() {
+      // Convert mouse coordinates to world space
+      let mouseVector = createVector(
+        map(mouseX, 0, width, -width/2, width/2),
+        map(mouseY, 0, height, -height/2, height/2),
+        0
+      );
+      
+      // Find nearest particle to mouse and apply a force
+      let minDist = Infinity;
+      let closestIdx = -1;
+      
+      for (let i = 0; i < particles.length; i++) {
+        let dist = p5.Vector.dist(
+          createVector(particles[i].pos.x, particles[i].pos.y, 0),
+          mouseVector
+        );
+        
+        if (dist < minDist) {
+          minDist = dist;
+          closestIdx = i;
+        }
+      }
+      
+      // Apply an impulse force outward
+      if (closestIdx >= 0 && minDist < 150) {
+        let strength = map(minDist, 0, 150, 20, 0);
+        
+        // Apply force to all particles with distance falloff
+        for (let i = 0; i < particles.length; i++) {
+          let p = particles[i];
+          let dist = p5.Vector.dist(
+            createVector(p.pos.x, p.pos.y, 0),
+            createVector(particles[closestIdx].pos.x, particles[closestIdx].pos.y, 0)
+          );
+          
+          if (dist < 100) {
+            let forceMult = map(dist, 0, 100, 1, 0) * strength;
+            let forceDir = p5.Vector.sub(p.pos, particles[closestIdx].pos).normalize();
+            p.pos.add(forceDir.mult(forceMult));
+          }
+        }
+      }
+    }
+    
+    function mouseDragged() {
+      // Similar to mousePressed but with reduced force
+      mousePressed();
+    }
+    
+    function updateFPSCounter() {
+      frameRateValues.push(frameRate());
+      if (frameRateValues.length > 30) {
+        frameRateValues.shift();
+      }
+      
+      let avgFPS = frameRateValues.reduce((sum, val) => sum + val, 0) / frameRateValues.length;
+      select('#fps-counter').html(`FPS: ${avgFPS.toFixed(1)}`);
+    }
+    
+    function updateParticlesInfo() {
+      select('#particles-info').html(`Particles: ${particles.length}, Constraints: ${constraints.length}`);
+    }
+    
+    function updateMouseInfo() {
+      let mouseWorldX = map(mouseX, 0, width, -width/2, width/2);
+      let mouseWorldY = map(mouseY, 0, height, -height/2, height/2);
+      
+      select('#mouse-info').html(`Mouse: X=${mouseWorldX.toFixed(0)}, Y=${mouseWorldY.toFixed(0)}`);
+      
+      lastMousePos = { x: mouseX, y: mouseY };
+    }
+    
+    function windowResized() {
+      resizeCanvas(windowWidth, windowHeight);
+    }
+  </script>
+</body>
+</html>
