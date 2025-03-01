@@ -1,0 +1,336 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Weather Pattern Simulator</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/p5.js/1.9.0/p5.min.js"></script>
+    <style>
+        body {
+            margin: 0;
+            padding: 0;
+            overflow: hidden;
+            background-color: #f0f8ff;
+            font-family: Arial, sans-serif;
+        }
+        #canvas-container {
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            width: 100%;
+            height: 100vh;
+        }
+        .controls {
+            position: absolute;
+            top: 20px;
+            left: 20px;
+            background-color: rgba(255, 255, 255, 0.8);
+            padding: 15px;
+            border-radius: 10px;
+            box-shadow: 0 0 10px rgba(0, 0, 0, 0.2);
+        }
+        .slider-container {
+            margin-bottom: 10px;
+        }
+        .slider-label {
+            display: inline-block;
+            width: 150px;
+        }
+        button {
+            margin-top: 10px;
+            padding: 8px 15px;
+            background-color: #4CAF50;
+            color: white;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+        }
+        button:hover {
+            background-color: #45a049;
+        }
+        select {
+            padding: 5px;
+            border-radius: 4px;
+            margin-bottom: 10px;
+        }
+    </style>
+</head>
+<body>
+    <div id="canvas-container"></div>
+    <div class="controls">
+        <h2>Weather Pattern Simulator</h2>
+        
+        <div class="slider-container">
+            <span class="slider-label">Wind Speed:</span>
+            <input type="range" id="wind-speed" min="0" max="0.5" step="0.01" value="0.15">
+        </div>
+        
+        <div class="slider-container">
+            <span class="slider-label">Turbulence:</span>
+            <input type="range" id="turbulence" min="0" max="0.1" step="0.001" value="0.02">
+        </div>
+        
+        <div class="slider-container">
+            <span class="slider-label">Temperature:</span>
+            <input type="range" id="temperature" min="0" max="1" step="0.01" value="0.5">
+        </div>
+        
+        <div class="slider-container">
+            <span class="slider-label">Particles:</span>
+            <input type="range" id="particles" min="100" max="5000" step="100" value="2000">
+        </div>
+        
+        <select id="weather-type">
+            <option value="clear">Clear Sky</option>
+            <option value="storm">Storm System</option>
+            <option value="hurricane">Hurricane</option>
+            <option value="front">Weather Front</option>
+        </select>
+        
+        <button id="reset-btn">Reset Simulation</button>
+    </div>
+
+    <script>
+        let particles = [];
+        let flowField = [];
+        let cols, rows;
+        let resolution = 20;
+        let windSpeed = 0.15;
+        let turbulence = 0.02;
+        let temperature = 0.5;
+        let particleCount = 2000;
+        let weatherType = "clear";
+        let zoff = 0;
+        let canvas;
+        
+        function setup() {
+            canvas = createCanvas(windowWidth, windowHeight);
+            canvas.parent('canvas-container');
+            
+            cols = floor(width / resolution);
+            rows = floor(height / resolution);
+            
+            // Initialize flow field
+            for (let i = 0; i < cols; i++) {
+                flowField[i] = [];
+                for (let j = 0; j < rows; j++) {
+                    flowField[i][j] = createVector(0, 0);
+                }
+            }
+            
+            initializeParticles();
+            
+            // Add event listeners for controls
+            document.getElementById('wind-speed').addEventListener('input', function() {
+                windSpeed = parseFloat(this.value);
+            });
+            
+            document.getElementById('turbulence').addEventListener('input', function() {
+                turbulence = parseFloat(this.value);
+            });
+            
+            document.getElementById('temperature').addEventListener('input', function() {
+                temperature = parseFloat(this.value);
+            });
+            
+            document.getElementById('particles').addEventListener('input', function() {
+                let newCount = parseInt(this.value);
+                if (newCount > particles.length) {
+                    for (let i = particles.length; i < newCount; i++) {
+                        particles.push(createParticle());
+                    }
+                } else {
+                    particles = particles.slice(0, newCount);
+                }
+                particleCount = newCount;
+            });
+            
+            document.getElementById('weather-type').addEventListener('change', function() {
+                weatherType = this.value;
+                resetSimulation();
+            });
+            
+            document.getElementById('reset-btn').addEventListener('click', resetSimulation);
+        }
+
+        function resetSimulation() {
+            particles = [];
+            initializeParticles();
+            zoff = 0;
+        }
+        
+        function initializeParticles() {
+            for (let i = 0; i < particleCount; i++) {
+                particles.push(createParticle());
+            }
+        }
+        
+        function createParticle() {
+            // Initialize with safe values
+            return {
+                pos: createVector(random(width), random(height)),
+                vel: createVector(0, 0),
+                acc: createVector(0, 0),
+                maxSpeed: random(1, 4),
+                color: color(
+                    constrain(random(160, 240), 0, 255),
+                    constrain(random(160, 240), 0, 255),
+                    constrain(random(160, 240), 0, 255),
+                    100
+                ),
+                size: constrain(random(1, 3), 0.5, 5),
+                age: 0,
+                lifespan: constrain(random(100, 500), 50, 1000)
+            };
+        }
+        
+        function draw() {
+            background(0, 0, 40, 10);
+            
+            updateFlowField();
+            updateAndDisplayParticles();
+            
+            zoff += 0.003;
+        }
+        
+        function updateFlowField() {
+            let yoff = 0;
+            for (let y = 0; y < rows; y++) {
+                let xoff = 0;
+                for (let x = 0; x < cols; x++) {
+                    let angle;
+                    // Define variables outside switch to avoid scope issues
+                    let centerX, centerY, dx, dy, distance, frontPosition;
+                    
+                    // Create a consistent noise value for this cell
+                    let noiseValue = noise(xoff, yoff, zoff);
+                    
+                    switch (weatherType) {
+                        case "clear":
+                            // Gentle flow from left to right with slight variations
+                            angle = noiseValue * TWO_PI * turbulence + PI/2 - (PI * temperature/2);
+                            break;
+                        case "storm":
+                            // Circular storm system with inward flow
+                            centerX = cols / 2;
+                            centerY = rows / 2;
+                            dx = x - centerX;
+                            dy = y - centerY;
+                            angle = atan2(dy, dx) + PI + noiseValue * PI * turbulence;
+                            break;
+                        case "hurricane":
+                            // Spiral hurricane pattern
+                            centerX = cols / 2;
+                            centerY = rows / 2;
+                            dx = x - centerX;
+                            dy = y - centerY;
+                            distance = sqrt(dx*dx + dy*dy);
+                            angle = atan2(dy, dx) + distance * 0.05 + noiseValue * turbulence * TWO_PI;
+                            break;
+                        case "front":
+                            // Weather front with converging flows
+                            frontPosition = cols * (0.4 + 0.2 * sin(zoff * 2));
+                            if (x < frontPosition) {
+                                angle = noiseValue * TWO_PI * turbulence + PI * 0.75;
+                            } else {
+                                angle = noiseValue * TWO_PI * turbulence + PI * 0.25;
+                            }
+                            break;
+                        default:
+                            // Default case to ensure angle is always initialized
+                            angle = noiseValue * TWO_PI;
+                    }
+                    
+                    let v = p5.Vector.fromAngle(angle);
+                    v.setMag(windSpeed);
+                    flowField[x][y] = v;
+                    
+                    xoff += 0.1;
+                }
+                yoff += 0.1;
+            }
+        }
+        
+        function updateAndDisplayParticles() {
+            for (let i = particles.length - 1; i >= 0; i--) {
+                let p = particles[i];
+                p.age++;
+                
+                try {
+                    // Find the flow field vector at this position
+                    let x = floor(p.pos.x / resolution);
+                    let y = floor(p.pos.y / resolution);
+                    
+                    // Constrain to prevent out of bounds errors
+                    x = constrain(x, 0, cols - 1);
+                    y = constrain(y, 0, rows - 1);
+                    
+                    // Check if flow field exists at this position
+                    if (flowField[x] && flowField[x][y]) {
+                        let force = flowField[x][y];
+                        p.acc.add(force);
+                    }
+                    
+                    // Add some randomness based on turbulence
+                    p.acc.add(createVector(random(-turbulence, turbulence), random(-turbulence, turbulence)));
+                    
+                    // Add temperature effect (rising hot air)
+                    p.acc.add(createVector(0, -temperature * 0.02));
+                    
+                    // Update physics
+                    p.vel.add(p.acc);
+                    p.vel.limit(p.maxSpeed);
+                    p.pos.add(p.vel);
+                    p.acc.mult(0);
+                    
+                    // Wrap around the edges
+                    if (p.pos.x > width) p.pos.x = 0;
+                    if (p.pos.x < 0) p.pos.x = width;
+                    if (p.pos.y > height) p.pos.y = 0;
+                    if (p.pos.y < 0) p.pos.y = height;
+                    
+                    // Calculate opacity based on age
+                    let opacity = map(p.age, 0, p.lifespan, 100, 0);
+                    let particleColor = color(red(p.color), green(p.color), blue(p.color), opacity);
+                    
+                    // Display the particle with a slight trail
+                    stroke(particleColor);
+                    strokeWeight(p.size);
+                    point(p.pos.x, p.pos.y);
+                    
+                    // Create a small trail
+                    let prevPos = createVector(p.pos.x - p.vel.x, p.pos.y - p.vel.y);
+                    strokeWeight(p.size * 0.8);
+                    line(p.pos.x, p.pos.y, prevPos.x, prevPos.y);
+                    
+                    // Remove particles that have exceeded their lifespan
+                    if (p.age >= p.lifespan) {
+                        particles.splice(i, 1);
+                        particles.push(createParticle());
+                    }
+                } catch (e) {
+                    // Handle any errors gracefully
+                    console.log("Error with particle", i, e);
+                    // Replace problematic particle
+                    particles[i] = createParticle();
+                }
+            }
+        }
+        
+        function windowResized() {
+            resizeCanvas(windowWidth, windowHeight);
+            cols = floor(width / resolution);
+            rows = floor(height / resolution);
+            
+            // Reinitialize flow field with new dimensions
+            flowField = [];
+            for (let i = 0; i < cols; i++) {
+                flowField[i] = [];
+                for (let j = 0; j < rows; j++) {
+                    flowField[i][j] = createVector(0, 0);
+                }
+            }
+        }
+    </script>
+</body>
+</html>

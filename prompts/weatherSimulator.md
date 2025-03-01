@@ -1,0 +1,1 @@
+create a p5js sketch inside html about Weather Pattern Simulator: A fluid dynamics visualization of atmospheric conditions.
