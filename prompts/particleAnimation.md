@@ -22,3 +22,6 @@ Make the canvas responsive to window resizing
 
 Add a glowing effect to particles with brightness based on distance from the mouse
 
+
+
+# Prompt Inspired by https://x.com/ivanfioravanti 
