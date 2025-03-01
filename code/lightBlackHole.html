@@ -1,0 +1,286 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Black Hole Light Bending Simulation</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/p5.js/1.4.0/p5.min.js"></script>
+    <style>
+        body {
+            margin: 0;
+            padding: 0;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            height: 100vh;
+            background-color: #000;
+            color: #fff;
+            font-family: Arial, sans-serif;
+        }
+        
+        #simulation-container {
+            position: relative;
+            width: 800px;
+            max-width: 100%;
+        }
+        
+        canvas {
+            display: block;
+            margin: 0 auto;
+        }
+        
+        .controls {
+            margin-top: 10px;
+            text-align: center;
+        }
+        
+        button, input {
+            margin: 5px;
+            padding: 8px 12px;
+            background: #333;
+            color: white;
+            border: 1px solid #555;
+            border-radius: 4px;
+        }
+        
+        .label {
+            display: inline-block;
+            width: 160px;
+            text-align: right;
+            margin-right: 10px;
+        }
+    </style>
+</head>
+<body>
+    <div id="simulation-container">
+        <div id="canvas-container"></div>
+        <div class="controls">
+            <div>
+                <span class="label">Black Hole Mass:</span>
+                <input type="range" id="mass-slider" min="1" max="50" value="15">
+                <span id="mass-value">15</span>
+            </div>
+            <div>
+                <span class="label">Number of Light Rays:</span>
+                <input type="range" id="rays-slider" min="50" max="300" value="150">
+                <span id="rays-value">150</span>
+            </div>
+            <div>
+                <span class="label">Background Stars:</span>
+                <input type="range" id="stars-slider" min="100" max="1000" value="500">
+                <span id="stars-value">500</span>
+            </div>
+            <div>
+                <button id="reset-btn">Reset Simulation</button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        let blackHoleMass = 15;
+        let numRays = 150;
+        let numStars = 500;
+        let lightRays = [];
+        let stars = [];
+        let blackHoleRadius;
+        let photonSphereRadius;
+        let centerX, centerY;
+        
+        function setup() {
+            let canvas = createCanvas(800, 600);
+            canvas.parent('canvas-container');
+            
+            centerX = width / 2;
+            centerY = height / 2;
+            
+            // Set up UI controls
+            document.getElementById('mass-slider').addEventListener('input', function() {
+                blackHoleMass = parseInt(this.value);
+                document.getElementById('mass-value').textContent = blackHoleMass;
+                updateBlackHoleParameters();
+                resetSimulation();
+            });
+            
+            document.getElementById('rays-slider').addEventListener('input', function() {
+                numRays = parseInt(this.value);
+                document.getElementById('rays-value').textContent = numRays;
+                resetSimulation();
+            });
+            
+            document.getElementById('stars-slider').addEventListener('input', function() {
+                numStars = parseInt(this.value);
+                document.getElementById('stars-value').textContent = numStars;
+                createStars();
+            });
+            
+            document.getElementById('reset-btn').addEventListener('click', resetSimulation);
+            
+            updateBlackHoleParameters();
+            createStars();
+            initLightRays();
+        }
+        
+        function updateBlackHoleParameters() {
+            blackHoleRadius = blackHoleMass * 1.5; // Event horizon radius
+            photonSphereRadius = blackHoleRadius * 1.5; // Photon sphere at 1.5 times the Schwarzschild radius
+        }
+        
+        function createStars() {
+            stars = [];
+            for (let i = 0; i < numStars; i++) {
+                stars.push({
+                    x: random(width),
+                    y: random(height),
+                    size: random(0.5, 2.5),
+                    brightness: random(100, 255)
+                });
+            }
+        }
+        
+        function initLightRays() {
+            lightRays = [];
+            
+            // Create rays coming from the left side
+            for (let i = 0; i < numRays; i++) {
+                let y = map(i, 0, numRays - 1, height * 0.1, height * 0.9);
+                lightRays.push({
+                    x: 0,
+                    y: y,
+                    angle: 0, // moving horizontally from left
+                    speed: 2,
+                    trail: [],
+                    maxTrailLength: 150,
+                    active: true,
+                    color: color(255, 200, 100, 150)
+                });
+            }
+        }
+        
+        function draw() {
+            background(0);
+            
+            // Draw stars in background
+            drawStars();
+            
+            // Draw photon sphere (area where photons can orbit the black hole)
+            noFill();
+            stroke(30, 100, 255, 80);
+            strokeWeight(1);
+            ellipse(centerX, centerY, photonSphereRadius * 2);
+            
+            // Draw event horizon
+            fill(0);
+            stroke(40);
+            strokeWeight(2);
+            ellipse(centerX, centerY, blackHoleRadius * 2);
+            
+            // Add accretion disk glow
+            drawAccretionDisk();
+            
+            // Update and draw light rays
+            updateLightRays();
+            drawLightRays();
+        }
+        
+        function drawStars() {
+            noStroke();
+            for (let star of stars) {
+                fill(star.brightness);
+                ellipse(star.x, star.y, star.size);
+            }
+        }
+        
+        function drawAccretionDisk() {
+            // Draw accretion disk with colors
+            let diskRadius = photonSphereRadius * 2.5;
+            let innerRadius = photonSphereRadius * 1.2;
+            
+            for (let r = diskRadius; r > innerRadius; r -= 0.8) {
+                let alpha = map(r, innerRadius, diskRadius, 80, 0);
+                let hueVal = map(r, innerRadius, diskRadius, 0, 60);
+                let diskColor = color(hueVal, 100, 100, alpha);
+                
+                strokeWeight(1);
+                stroke(diskColor);
+                noFill();
+                
+                // Add some variation to make it look less uniform
+                let variation = map(noise(r * 0.1, frameCount * 0.01), 0, 1, 0.96, 1.04);
+                ellipse(centerX, centerY, r * 2 * variation, r * 1.8 * variation);
+            }
+        }
+        
+        function updateLightRays() {
+            for (let ray of lightRays) {
+                if (!ray.active) continue;
+                
+                // Calculate distance from black hole center
+                let dx = ray.x - centerX;
+                let dy = ray.y - centerY;
+                let distance = sqrt(dx * dx + dy * dy);
+                
+                // Add position to trail
+                ray.trail.push({x: ray.x, y: ray.y});
+                if (ray.trail.length > ray.maxTrailLength) {
+                    ray.trail.shift();
+                }
+                
+                // Check if ray has been captured by event horizon
+                if (distance < blackHoleRadius) {
+                    ray.active = false;
+                    continue;
+                }
+                
+                // Calculate gravitational effect (bending)
+                let forceDirection = createVector(centerX - ray.x, centerY - ray.y);
+                let forceMagnitude = (blackHoleMass * 2) / (distance * distance);
+                forceMagnitude = constrain(forceMagnitude, 0, 0.3); // Limit the force
+                
+                // Get current direction vector
+                let direction = createVector(cos(ray.angle), sin(ray.angle));
+                
+                // Apply gravitational force to direction
+                forceDirection.normalize();
+                forceDirection.mult(forceMagnitude);
+                direction.add(forceDirection);
+                direction.normalize();
+                
+                // Update angle and position
+                ray.angle = atan2(direction.y, direction.x);
+                ray.x += cos(ray.angle) * ray.speed;
+                ray.y += sin(ray.angle) * ray.speed;
+                
+                // Check if ray is out of bounds
+                if (ray.x < 0 || ray.x > width || ray.y < 0 || ray.y > height) {
+                    ray.active = false;
+                }
+            }
+        }
+        
+        function drawLightRays() {
+            for (let ray of lightRays) {
+                if (ray.trail.length < 2) continue;
+                
+                // Draw the trail with gradient opacity
+                for (let i = 0; i < ray.trail.length - 1; i++) {
+                    let alpha = map(i, 0, ray.trail.length - 1, 0, 100);
+                    let rayColor = color(red(ray.color), green(ray.color), blue(ray.color), alpha);
+                    stroke(rayColor);
+                    strokeWeight(1);
+                    
+                    line(
+                        ray.trail[i].x,
+                        ray.trail[i].y,
+                        ray.trail[i + 1].x,
+                        ray.trail[i + 1].y
+                    );
+                }
+            }
+        }
+        
+        function resetSimulation() {
+            initLightRays();
+        }
+    </script>
+</body>
+</html>

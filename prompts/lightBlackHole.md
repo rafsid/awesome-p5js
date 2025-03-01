@@ -1,0 +1,2 @@
+create a p5js sketch inside html of Black Hole Light Bending Simulation
+Prompt: Visualize the gravitational lensing effect around a black hole, showing how light rays bend and distort as they pass near the event horizon.
