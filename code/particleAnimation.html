@@ -1,0 +1,154 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>P5.js Particle Animation by https://x.com/ivanfioravanti </title>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/p5.js/1.4.0/p5.min.js"></script>
+  <style>
+    body {
+      margin: 0;
+      padding: 0;
+      overflow: hidden;
+      background-color: #111;
+    }
+    canvas {
+      display: block;
+    }
+  </style>
+</head>
+<body>
+  <script>
+    let particles = [];
+    const particleCount = 200;
+    let hueValue = 0;
+    
+    function setup() {
+      createCanvas(windowWidth, windowHeight);
+      colorMode(HSB, 360, 100, 100, 1);
+      
+      // Create initial particles
+      for (let i = 0; i < particleCount; i++) {
+        particles.push(new Particle());
+      }
+    }
+    
+    function draw() {
+      // Semi-transparent background for trail effect
+      background(0, 0, 0, 0.05);
+      
+      // Update and display particles
+      for (let i = 0; i < particles.length; i++) {
+        let p = particles[i];
+        p.update();
+        p.display();
+        
+        // Connect particles that are close to each other
+        for (let j = i + 1; j < particles.length; j++) {
+          let other = particles[j];
+          let d = dist(p.pos.x, p.pos.y, other.pos.x, other.pos.y);
+          
+          if (d < 100) {
+            let alpha = map(d, 0, 100, 0.5, 0);
+            stroke(hueValue, 80, 100, alpha);
+            line(p.pos.x, p.pos.y, other.pos.x, other.pos.y);
+          }
+        }
+      }
+      
+      // Cycle through colors
+      hueValue = (hueValue + 0.5) % 360;
+    }
+    
+    function windowResized() {
+      resizeCanvas(windowWidth, windowHeight);
+    }
+    
+    function mousePressed() {
+      // Add new particles on mouse press
+      for (let i = 0; i < 10; i++) {
+        particles.push(new Particle(mouseX, mouseY));
+      }
+    }
+    
+    class Particle {
+      constructor(x, y) {
+        // If position is provided, use it; otherwise, random position
+        this.pos = createVector(x || random(width), y || random(height));
+        
+        // Random velocity
+        this.vel = createVector(random(-1, 1), random(-1, 1)).mult(2);
+        
+        // Random size
+        this.size = random(3, 8);
+        
+        // Random individual hue offset
+        this.hueOffset = random(0, 60);
+        
+        // Attraction to mouse position
+        this.mouseAttraction = random(0.1, 0.3);
+        
+        // Random lifespan
+        this.lifespan = random(100, 200);
+        this.originalLifespan = this.lifespan;
+      }
+      
+      update() {
+        // Create a force towards the mouse
+        if (mouseIsPressed) {
+          let mousePos = createVector(mouseX, mouseY);
+          let dir = p5.Vector.sub(mousePos, this.pos);
+          dir.normalize();
+          dir.mult(this.mouseAttraction);
+          this.vel.add(dir);
+        }
+        
+        // Apply velocity to position
+        this.pos.add(this.vel);
+        
+        // Add some random movement
+        this.vel.add(createVector(random(-0.1, 0.1), random(-0.1, 0.1)));
+        
+        // Dampen velocity slightly
+        this.vel.mult(0.98);
+        
+        // Boundary wrapping
+        if (this.pos.x < 0) this.pos.x = width;
+        if (this.pos.x > width) this.pos.x = 0;
+        if (this.pos.y < 0) this.pos.y = height;
+        if (this.pos.y > height) this.pos.y = 0;
+        
+        // Decrease lifespan
+        this.lifespan--;
+        
+        // Reset particle if lifespan is over
+        if (this.lifespan <= 0) {
+          this.pos = createVector(random(width), random(height));
+          this.vel = createVector(random(-1, 1), random(-1, 1)).mult(2);
+          this.lifespan = this.originalLifespan;
+        }
+      }
+      
+      display() {
+        // Calculate individual hue and brightness based on mouse distance
+        let particleHue = (hueValue + this.hueOffset) % 360;
+        let d = dist(mouseX, mouseY, this.pos.x, this.pos.y);
+        let brightness = map(d, 0, 200, 100, 50);
+        brightness = constrain(brightness, 50, 100);
+        
+        // Calculate size based on lifespan
+        let currentSize = map(this.lifespan, 0, this.originalLifespan, 0, this.size);
+        
+        // Draw the particle
+        noStroke();
+        fill(particleHue, 80, brightness, 0.8);
+        circle(this.pos.x, this.pos.y, currentSize);
+        
+        // Optional glowing effect
+        fill(particleHue, 80, brightness, 0.3);
+        circle(this.pos.x, this.pos.y, currentSize * 2);
+      }
+    }
+  </script>
+</body>
+</html>
