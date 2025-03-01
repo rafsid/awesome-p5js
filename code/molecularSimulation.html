@@ -1,0 +1,342 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Molecular Bonding and Thermal Motion Simulation</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/p5.js/1.7.0/p5.min.js"></script>
+    <style>
+        body {
+            margin: 0;
+            padding: 20px;
+            font-family: Arial, sans-serif;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            background-color: #f0f0f0;
+        }
+        canvas {
+            display: block;
+            margin: 20px auto;
+            border: 1px solid #ccc;
+            box-shadow: 0 0 10px rgba(0,0,0,0.1);
+        }
+        .controls {
+            width: 80%;
+            max-width: 600px;
+            margin: 20px auto;
+            padding: 15px;
+            background-color: white;
+            border-radius: 8px;
+            box-shadow: 0 0 10px rgba(0,0,0,0.1);
+        }
+        .slider-container {
+            margin: 10px 0;
+        }
+        label {
+            display: inline-block;
+            width: 180px;
+            font-weight: bold;
+        }
+        button {
+            background-color: #4CAF50;
+            border: none;
+            color: white;
+            padding: 8px 16px;
+            text-align: center;
+            text-decoration: none;
+            display: inline-block;
+            font-size: 14px;
+            margin: 10px 5px;
+            cursor: pointer;
+            border-radius: 4px;
+        }
+        .info {
+            width: 80%;
+            max-width: 600px;
+            margin: 10px auto;
+            padding: 15px;
+            background-color: white;
+            border-radius: 8px;
+            box-shadow: 0 0 10px rgba(0,0,0,0.1);
+        }
+    </style>
+</head>
+<body>
+    <h1>Molecular Bonding and Thermal Motion Simulation</h1>
+    
+    <div class="controls">
+        <div class="slider-container">
+            <label for="temperatureSlider">Temperature:</label>
+            <input type="range" id="temperatureSlider" min="0" max="100" value="50">
+            <span id="temperatureValue">50</span>
+        </div>
+        
+        <div class="slider-container">
+            <label for="bondStrengthSlider">Bond Strength:</label>
+            <input type="range" id="bondStrengthSlider" min="1" max="100" value="50">
+            <span id="bondStrengthValue">50</span>
+        </div>
+        
+        <div class="slider-container">
+            <label for="numAtomsSlider">Number of Atoms:</label>
+            <input type="range" id="numAtomsSlider" min="10" max="100" value="30">
+            <span id="numAtomsValue">30</span>
+        </div>
+        
+        <button id="resetBtn">Reset Simulation</button>
+        <button id="addAtomBtn">Add Atom</button>
+    </div>
+    
+    <div class="info">
+        <p><strong>How it works:</strong> This simulation shows how atoms move and bond under thermal conditions.</p>
+        <p>- Atoms with similar colors have stronger bonding potential</p>
+        <p>- Increase temperature to see more thermal motion</p>
+        <p>- Adjust bond strength to see how it affects molecular stability</p>
+    </div>
+    
+    <script>
+        let atoms = [];
+        let temperature = 50;
+        let bondStrength = 50;
+        let numAtoms = 30;
+        let atomTypes = [
+            { color: [255, 0, 0], radius: 15, mass: 1.0 },    // Red (Type 1)
+            { color: [0, 0, 255], radius: 15, mass: 1.0 },    // Blue (Type 2)
+            { color: [0, 255, 0], radius: 15, mass: 1.0 },    // Green (Type 3)
+            { color: [255, 255, 0], radius: 15, mass: 1.0 }   // Yellow (Type 4)
+        ];
+        
+        // Binding matrix determines how strongly different atom types bond together
+        let bondingMatrix = [
+            [0.9, 0.5, 0.3, 0.1],  // Type 1 bonds with types 1-4
+            [0.5, 0.8, 0.6, 0.2],  // Type 2 bonds with types 1-4
+            [0.3, 0.6, 0.9, 0.7],  // Type 3 bonds with types 1-4
+            [0.1, 0.2, 0.7, 0.8]   // Type 4 bonds with types 1-4
+        ];
+        
+        function setup() {
+            createCanvas(600, 400);
+            initializeAtoms();
+            setupUIControls();
+        }
+        
+        function initializeAtoms() {
+            atoms = [];
+            for (let i = 0; i < numAtoms; i++) {
+                addRandomAtom();
+            }
+        }
+        
+        function addRandomAtom() {
+            const typeIndex = Math.floor(random(atomTypes.length));
+            const type = atomTypes[typeIndex];
+            atoms.push({
+                position: createVector(random(width), random(height)),
+                velocity: p5.Vector.random2D().mult(random(0.5, 1.5)),
+                acceleration: createVector(0, 0),
+                type: typeIndex,
+                color: type.color,
+                radius: type.radius,
+                mass: type.mass
+            });
+        }
+        
+        function setupUIControls() {
+            const tempSlider = document.getElementById('temperatureSlider');
+            const tempValue = document.getElementById('temperatureValue');
+            tempSlider.oninput = function() {
+                temperature = this.value;
+                tempValue.textContent = this.value;
+            };
+            
+            const bondSlider = document.getElementById('bondStrengthSlider');
+            const bondValue = document.getElementById('bondStrengthValue');
+            bondSlider.oninput = function() {
+                bondStrength = this.value;
+                bondValue.textContent = this.value;
+            };
+            
+            const numAtomsSlider = document.getElementById('numAtomsSlider');
+            const numAtomsValue = document.getElementById('numAtomsValue');
+            numAtomsSlider.oninput = function() {
+                const newValue = parseInt(this.value);
+                // Add or remove atoms to match the new count
+                if (newValue > atoms.length) {
+                    for (let i = atoms.length; i < newValue; i++) {
+                        addRandomAtom();
+                    }
+                } else if (newValue < atoms.length) {
+                    atoms = atoms.slice(0, newValue);
+                }
+                numAtoms = newValue;
+                numAtomsValue.textContent = newValue;
+            };
+            
+            document.getElementById('resetBtn').onclick = function() {
+                initializeAtoms();
+            };
+            
+            document.getElementById('addAtomBtn').onclick = function() {
+                addRandomAtom();
+                numAtoms = atoms.length;
+                numAtomsSlider.value = numAtoms;
+                numAtomsValue.textContent = numAtoms;
+            };
+        }
+        
+        function draw() {
+            background(240);
+            
+            // Calculate forces and update positions
+            updateForces();
+            updatePositions();
+            
+            // Draw bonds first (so they appear under atoms)
+            drawBonds();
+            
+            // Draw all atoms
+            for (let atom of atoms) {
+                fill(atom.color);
+                stroke(0);
+                strokeWeight(1);
+                ellipse(atom.position.x, atom.position.y, atom.radius * 2);
+            }
+            
+            // Apply thermal motion based on temperature
+            applyThermalMotion();
+        }
+        
+        function updateForces() {
+            // Reset accelerations
+            for (let atom of atoms) {
+                atom.acceleration = createVector(0, 0);
+            }
+            
+            // Calculate forces between each pair of atoms
+            for (let i = 0; i < atoms.length; i++) {
+                for (let j = i + 1; j < atoms.length; j++) {
+                    applyForcesBetweenAtoms(atoms[i], atoms[j]);
+                }
+            }
+        }
+        
+        function applyForcesBetweenAtoms(atomA, atomB) {
+            // Calculate distance between atoms
+            const direction = p5.Vector.sub(atomB.position, atomA.position);
+            const distance = direction.mag();
+            
+            // Skip if atoms are too far apart (optimization)
+            if (distance > 100) return;
+            
+            // Normalize direction vector
+            direction.normalize();
+            
+            // Get bonding strength between these atom types
+            const bondFactor = bondingMatrix[atomA.type][atomB.type] * (bondStrength / 50);
+            
+            // Calculate equilibrium distance based on atom radii
+            const equilibriumDistance = atomA.radius + atomB.radius;
+            
+            // Calculate force magnitude using a simplified molecular potential
+            let forceMagnitude = 0;
+            
+            if (distance < equilibriumDistance) {
+                // Repulsive force when atoms are too close (grows exponentially)
+                forceMagnitude = -bondFactor * 0.5 * Math.exp((equilibriumDistance - distance) / 5);
+            } else {
+                // Attractive force when atoms are at good distance for bonding
+                const bondingDistance = equilibriumDistance * 2.5;
+                if (distance < bondingDistance) {
+                    // Attractive force that weakens with distance
+                    forceMagnitude = bondFactor * 0.1 * (1 - (distance - equilibriumDistance) / bondingDistance);
+                }
+            }
+            
+            // Apply the calculated force to both atoms (equal and opposite)
+            const force = direction.copy().mult(forceMagnitude);
+            atomA.acceleration.sub(force.div(atomA.mass));
+            atomB.acceleration.add(force.div(atomB.mass));
+        }
+        
+        function updatePositions() {
+            for (let atom of atoms) {
+                // Update velocity based on acceleration
+                atom.velocity.add(atom.acceleration);
+                
+                // Apply very simple drag/damping
+                atom.velocity.mult(0.98);
+                
+                // Update position based on velocity
+                atom.position.add(atom.velocity);
+                
+                // Boundary conditions - bounce off walls
+                if (atom.position.x < atom.radius) {
+                    atom.position.x = atom.radius;
+                    atom.velocity.x *= -0.8;
+                } else if (atom.position.x > width - atom.radius) {
+                    atom.position.x = width - atom.radius;
+                    atom.velocity.x *= -0.8;
+                }
+                
+                if (atom.position.y < atom.radius) {
+                    atom.position.y = atom.radius;
+                    atom.velocity.y *= -0.8;
+                } else if (atom.position.y > height - atom.radius) {
+                    atom.position.y = height - atom.radius;
+                    atom.velocity.y *= -0.8;
+                }
+            }
+        }
+        
+        function applyThermalMotion() {
+            // Scale thermal motion based on temperature slider
+            const thermalScale = temperature / 50;
+            
+            for (let atom of atoms) {
+                // Add random thermal motion
+                const thermalForce = p5.Vector.random2D().mult(random(0, 0.15 * thermalScale));
+                atom.velocity.add(thermalForce);
+            }
+        }
+        
+        function drawBonds() {
+            for (let i = 0; i < atoms.length; i++) {
+                for (let j = i + 1; j < atoms.length; j++) {
+                    const atomA = atoms[i];
+                    const atomB = atoms[j];
+                    
+                    // Calculate distance
+                    const dist = p5.Vector.dist(atomA.position, atomB.position);
+                    
+                    // Get bonding strength between these atom types
+                    const bondFactor = bondingMatrix[atomA.type][atomB.type] * (bondStrength / 50);
+                    
+                    // Calculate equilibrium distance and bonding distance
+                    const equilibriumDistance = atomA.radius + atomB.radius;
+                    const bondingDistance = equilibriumDistance * 2.5;
+                    
+                    // Draw bond if atoms are within bonding distance
+                    if (dist <= bondingDistance) {
+                        // Calculate bond strength - stronger when closer to equilibrium
+                        const strength = bondFactor * (1 - Math.abs(dist - equilibriumDistance) / bondingDistance);
+                        
+                        // Only draw visible bonds
+                        if (strength > 0.1) {
+                            // Calculate bond color (blend of the two atom colors)
+                            const r = Math.floor((atomA.color[0] + atomB.color[0]) / 2);
+                            const g = Math.floor((atomA.color[1] + atomB.color[1]) / 2);
+                            const b = Math.floor((atomA.color[2] + atomB.color[2]) / 2);
+                            
+                            // Draw the bond with opacity based on strength
+                            stroke(r, g, b, 255 * strength);
+                            strokeWeight(3 * strength);
+                            line(atomA.position.x, atomA.position.y, atomB.position.x, atomB.position.y);
+                        }
+                    }
+                }
+            }
+        }
+    </script>
+</body>
+</html>
