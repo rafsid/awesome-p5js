@@ -1,0 +1,265 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Interactive Solar System</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/p5.js/1.4.0/p5.js"></script>
+    <style>
+        body {
+            margin: 0;
+            padding: 0;
+            overflow: hidden;
+            background-color: #000;
+        }
+        .controls {
+            position: absolute;
+            top: 20px;
+            left: 20px;
+            color: white;
+            font-family: Arial, sans-serif;
+            background-color: rgba(0, 0, 0, 0.7);
+            padding: 10px;
+            border-radius: 5px;
+        }
+    </style>
+</head>
+<body>
+    <div class="controls">
+        <div>
+            <label for="gravity">Gravity: </label>
+            <input type="range" id="gravity" min="1" max="200" value="100">
+            <span id="gravityValue">1.0</span>
+        </div>
+        <div>
+            <label for="speed">Speed: </label>
+            <input type="range" id="speed" min="5" max="100" value="30">
+            <span id="speedValue">0.3</span>
+        </div>
+        <div>
+            <button id="clearTrails">Clear Trails</button>
+            <button id="reset">Reset Simulation</button>
+        </div>
+        <div>
+            <p>Click anywhere to add a planet</p>
+            <p>Planets: <span id="planetCount">0</span></p>
+        </div>
+    </div>
+
+    <script>
+        let planets = [];
+        let sun;
+        let trails = [];
+        let gravitySlider;
+        let speedSlider;
+        let clearTrailsButton;
+        let resetButton;
+        let planetCountSpan;
+        let gravityValueSpan;
+        let speedValueSpan;
+        let baseGravity = 1.0;
+        let timeScale = 0.3;  // Added time scale factor to slow down simulation
+
+        function setup() {
+            createCanvas(windowWidth, windowHeight);
+            colorMode(HSB, 360, 100, 100, 1);
+            
+            // Initialize UI controls
+            gravitySlider = document.getElementById('gravity');
+            speedSlider = document.getElementById('speed');
+            clearTrailsButton = document.getElementById('clearTrails');
+            resetButton = document.getElementById('reset');
+            planetCountSpan = document.getElementById('planetCount');
+            gravityValueSpan = document.getElementById('gravityValue');
+            speedValueSpan = document.getElementById('speedValue');
+            
+            // Add event listeners
+            gravitySlider.addEventListener('input', updateGravity);
+            speedSlider.addEventListener('input', updateSpeed);
+            clearTrailsButton.addEventListener('click', clearTrails);
+            resetButton.addEventListener('click', resetSimulation);
+            
+            // Create the sun
+            sun = new CelestialBody(width/2, height/2, 50, color(30, 100, 100), true);
+            
+            // Add some initial planets with reduced initial velocities
+            addPlanet(width/2 + 150, height/2, 0, -2.5);
+            addPlanet(width/2 - 200, height/2, 0, 2);
+            addPlanet(width/2, height/2 + 250, -1.5, 0);
+            
+            updatePlanetCount();
+        }
+
+        function draw() {
+            background(0, 0, 0, 0.2); // Made more transparent for longer trails
+            
+            // Draw trails
+            for (let trail of trails) {
+                stroke(trail.color);
+                point(trail.x, trail.y);
+            }
+            
+            // Update and draw the sun
+            sun.display();
+            
+            // Update and draw planets
+            for (let i = planets.length - 1; i >= 0; i--) {
+                // Apply gravity from sun
+                planets[i].applyGravity(sun);
+                
+                // Apply gravity from other planets
+                for (let j = 0; j < planets.length; j++) {
+                    if (i !== j) {
+                        planets[i].applyGravity(planets[j]);
+                    }
+                }
+                
+                // Add trail point (reduced frequency for slower appearance)
+                if (frameCount % 3 === 0) {
+                    trails.push({
+                        x: planets[i].pos.x,
+                        y: planets[i].pos.y,
+                        color: color(planets[i].hue, 70, 100, 0.5)
+                    });
+                }
+                
+                // Update and display planet
+                planets[i].update();
+                planets[i].display();
+                
+                // Remove planets that are too far away
+                const distToSun = dist(planets[i].pos.x, planets[i].pos.y, sun.pos.x, sun.pos.y);
+                if (distToSun > width * 2) {
+                    planets.splice(i, 1);
+                    updatePlanetCount();
+                }
+            }
+            
+            // Limit the number of trail points to prevent performance issues
+            if (trails.length > 5000) {
+                trails.splice(0, 200);
+            }
+        }
+
+        function mousePressed() {
+            // Add new planet when clicking, but not on UI elements
+            const isOnUI = mouseX < 200 && mouseY < 200;
+            if (!isOnUI) {
+                // Calculate initial velocity perpendicular to sun direction
+                const dirToSun = createVector(sun.pos.x - mouseX, sun.pos.y - mouseY);
+                const distance = dirToSun.mag();
+                dirToSun.normalize();
+                
+                // Perpendicular vector
+                const perpVector = createVector(-dirToSun.y, dirToSun.x);
+                
+                // Velocity based on distance (closer = faster to maintain orbit)
+                // Reduced overall speed by applying timeScale
+                const speed = sqrt(baseGravity * sun.mass / distance) * 0.5;
+                perpVector.mult(speed);
+                
+                addPlanet(mouseX, mouseY, perpVector.x, perpVector.y);
+            }
+        }
+
+        function addPlanet(x, y, vx, vy) {
+            const planetSize = random(5, 15);
+            const planetHue = random(360);
+            const planet = new CelestialBody(x, y, planetSize, color(planetHue, 100, 100), false);
+            planet.vel = createVector(vx, vy);
+            planet.hue = planetHue;
+            planets.push(planet);
+            updatePlanetCount();
+        }
+
+        function updateGravity() {
+            baseGravity = gravitySlider.value / 100;
+            gravityValueSpan.textContent = baseGravity.toFixed(2);
+        }
+        
+        function updateSpeed() {
+            timeScale = speedSlider.value / 100;
+            speedValueSpan.textContent = timeScale.toFixed(2);
+        }
+
+        function clearTrails() {
+            trails = [];
+        }
+
+        function resetSimulation() {
+            planets = [];
+            trails = [];
+            sun.pos = createVector(width/2, height/2);
+            sun.vel = createVector(0, 0);
+            
+            // Add some initial planets with reduced speed
+            addPlanet(width/2 + 150, height/2, 0, -2.5);
+            addPlanet(width/2 - 200, height/2, 0, 2);
+            addPlanet(width/2, height/2 + 250, -1.5, 0);
+        }
+
+        function updatePlanetCount() {
+            planetCountSpan.textContent = planets.length;
+        }
+
+        function windowResized() {
+            resizeCanvas(windowWidth, windowHeight);
+            sun.pos = createVector(width/2, height/2);
+        }
+
+        class CelestialBody {
+            constructor(x, y, radius, bodyColor, isSun) {
+                this.pos = createVector(x, y);
+                this.vel = createVector(0, 0);
+                this.acc = createVector(0, 0);
+                this.radius = radius;
+                this.color = bodyColor;
+                this.mass = radius * radius * (isSun ? 10 : 1);
+                this.isSun = isSun;
+            }
+            
+            applyGravity(other) {
+                const force = p5.Vector.sub(other.pos, this.pos);
+                const distance = constrain(force.mag(), 10, 1000);
+                const strength = (baseGravity * this.mass * other.mass) / (distance * distance);
+                force.normalize();
+                force.mult(strength);
+                
+                // Apply force divided by mass (F = ma, so a = F/m)
+                const acceleration = p5.Vector.div(force, this.mass);
+                this.acc.add(acceleration);
+            }
+            
+            update() {
+                // Don't move the sun unless dragged
+                if (!this.isSun) {
+                    // Apply time scaling to slow down movement
+                    this.vel.add(p5.Vector.mult(this.acc, timeScale));
+                    this.pos.add(p5.Vector.mult(this.vel, timeScale));
+                    this.acc.mult(0);
+                }
+            }
+            
+            display() {
+                noStroke();
+                
+                // Glow effect
+                if (this.isSun) {
+                    for (let i = 5; i > 0; i--) {
+                        fill(hue(this.color), saturation(this.color), brightness(this.color), 0.1 / i);
+                        ellipse(this.pos.x, this.pos.y, this.radius * i * 2);
+                    }
+                }
+                
+                // Main body
+                fill(this.color);
+                ellipse(this.pos.x, this.pos.y, this.radius * 2);
+                
+                // Velocity vector (for debugging)
+                // stroke(255);
+                // line(this.pos.x, this.pos.y, this.pos.x + this.vel.x * 10, this.pos.y + this.vel.y * 10);
+            }
+        }
+    </script>
+</body>
+</html>
