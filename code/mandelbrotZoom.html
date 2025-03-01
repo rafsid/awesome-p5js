@@ -1,0 +1,752 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Mandelbrot Explorer</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/p5.js/1.4.0/p5.js"></script>
+    <style>
+        body {
+            margin: 0;
+            padding: 0;
+            background-color: #000;
+            color: white;
+            font-family: Arial, sans-serif;
+            overflow: hidden;
+        }
+        .controls {
+            position: absolute;
+            top: 20px;
+            left: 20px;
+            background-color: rgba(0, 0, 0, 0.7);
+            padding: 15px;
+            border-radius: 5px;
+            z-index: 100;
+            width: 280px;
+        }
+        .control-group {
+            margin-bottom: 12px;
+        }
+        .control-group label {
+            display: block;
+            margin-bottom: 5px;
+        }
+        .coordinates {
+            position: absolute;
+            bottom: 20px;
+            left: 20px;
+            background-color: rgba(0, 0, 0, 0.7);
+            padding: 10px;
+            border-radius: 5px;
+            font-family: monospace;
+        }
+        button, select {
+            background-color: #444;
+            color: white;
+            border: none;
+            padding: 8px 12px;
+            margin-right: 5px;
+            border-radius: 3px;
+            cursor: pointer;
+        }
+        button:hover, select:hover {
+            background-color: #666;
+        }
+        input[type="range"] {
+            width: 100%;
+            background: #444;
+        }
+        canvas {
+            display: block;
+        }
+        .instructions {
+            margin-top: 15px;
+            font-size: 0.9em;
+            color: #ccc;
+        }
+    </style>
+</head>
+<body>
+    <div class="controls">
+        <h2>Mandelbrot Explorer</h2>
+        <div class="control-group">
+            <label for="maxIterations">Max Iterations: <span id="maxIterationValue">250</span></label>
+            <input type="range" id="maxIterations" min="50" max="10000" value="250" step="50">
+        </div>
+        <div class="control-group">
+            <label for="zoomSpeed">Zoom Speed: <span id="zoomSpeedValue">5</span></label>
+            <input type="range" id="zoomSpeed" min="1" max="10" value="5" step="1">
+        </div>
+        <div class="control-group">
+            <label for="colorScheme">Color Scheme:</label>
+            <select id="colorScheme">
+                <option value="rainbow">Rainbow</option>
+                <option value="fire">Fire</option>
+                <option value="ocean">Ocean</option>
+                <option value="grayscale">Grayscale</option>
+                <option value="electric">Electric</option>
+            </select>
+        </div>
+        <div class="control-group">
+            <button id="reset">Reset View</button>
+            <button id="saveImage">Save Image</button>
+            <button id="toggleGravity">Start Gravity Zoom</button>
+        </div>
+        <div class="instructions">
+            <p>Left-click: Zoom in</p>
+            <p>Right-click: Zoom out</p>
+            <p>Drag: Pan around (pauses gravity zoom)</p>
+        </div>
+    </div>
+    
+    <div class="coordinates">
+        <div>Center: <span id="centerCoord">(-0.5, 0.0)</span></div>
+        <div>Zoom: <span id="zoomLevel">1.0</span></div>
+        <div>Iterations: <span id="currentIterations">250</span></div>
+        <div>Render time: <span id="renderTime">0ms</span></div>
+    </div>
+
+    <script>
+        // Mandelbrot sketch using p5.js instance mode
+        let sketch = function(p) {
+            // === STATE ===
+            let centerX = -0.5;    // Center X coordinate in complex plane
+            let centerY = 0.0;     // Center Y coordinate in complex plane
+            let zoom = 1.0;        // Current zoom level
+            let maxIterations = 250; // Maximum iteration count for Mandelbrot calculation
+            let colorScheme = 'rainbow'; // Current color scheme
+            
+            // Rendering buffers
+            let mainBuffer;   // Main display buffer
+            let lowResBuffer; // Low resolution buffer for interactive operations
+            let needsFullRender = true;  // Flag to trigger full-quality render
+            
+            // Last render state
+            let lastZoom = 1.0;  // Zoom level of last full render
+            let lastCenterX = -0.5;  // X coordinate of last full render
+            let lastCenterY = 0.0;   // Y coordinate of last full render
+            let renderTime = 0;      // Time taken for last render
+            
+            // Interaction state
+            let isDragging = false;  // Whether user is currently dragging
+            let dragStartX = 0;      // Start X coordinate of drag (screen space)
+            let dragStartY = 0;      // Start Y coordinate of drag (screen space)
+            let dragStartCenterX = 0; // Start X coordinate of drag (complex plane)
+            let dragStartCenterY = 0; // Start Y coordinate of drag (complex plane)
+            
+            // Animation state
+            let isZooming = false;   // Whether zoom animation is active
+            let zoomProgress = 0;    // Progress of current zoom animation
+            let zoomTarget = 2.0;    // Target zoom factor
+            let zoomDuration = 30;   // Duration of zoom animation in frames
+            let zoomSpeed = 5;       // User-controlled zoom speed
+            
+            // Gravity zoom state
+            let gravityZooming = false; // Whether gravity zoom is active
+            let gravityTime = 0;      // Time elapsed in gravity zoom
+            let initialZoom = 1.0;    // Initial zoom level when gravity zoom started
+            const G_CONSTANT = 9.8;   // Gravity constant
+            
+            // UI elements
+            let uiElements = {};   // References to DOM elements
+            
+            // Performance settings
+            let lowResIterations = 50; // Iterations for interactive/low-res rendering
+            let renderDebounceTimer = null; // Timer for debounced high-quality rendering
+            
+            // === SETUP ===
+            p.setup = function() {
+                p.createCanvas(p.windowWidth, p.windowHeight);
+                p.pixelDensity(1); // Fix for high DPI displays
+                p.colorMode(p.HSB, 360, 100, 100);
+                p.frameRate(60);
+                
+                // Initialize rendering buffers
+                mainBuffer = p.createGraphics(p.width, p.height);
+                lowResBuffer = p.createGraphics(p.width, p.height);
+                
+                // Initialize UI
+                setupUI();
+                
+                // Initial render
+                renderMandelbrot(mainBuffer, maxIterations, 1);
+                lowResBuffer.copy(mainBuffer, 0, 0, p.width, p.height, 0, 0, p.width, p.height);
+                
+                // Save initial state
+                lastZoom = zoom;
+                lastCenterX = centerX;
+                lastCenterY = centerY;
+                dragStartCenterX = centerX;
+                dragStartCenterY = centerY;
+                
+                // Prevent context menu on right-click
+                document.addEventListener('contextmenu', e => e.preventDefault());
+            };
+            
+            // === DRAW LOOP ===
+            p.draw = function() {
+                // Update state based on interactions
+                updateState();
+                
+                // Render display
+                if (isDragging) {
+                    handleDragging();
+                } else if (isZooming || gravityZooming) {
+                    handleZooming();
+                } else if (needsFullRender) {
+                    renderHighQuality();
+                }
+                
+                // Draw to screen
+                p.image(mainBuffer, 0, 0);
+                
+                // Update UI
+                updateCoordinatesDisplay();
+            };
+            
+            // === STATE UPDATES ===
+            function updateState() {
+                // Handle manual zoom animation
+                if (isZooming) {
+                    zoomProgress++;
+                    
+                    // Apply easing for smooth zoom
+                    let t = Math.min(zoomProgress / zoomDuration, 1);
+                    t = easeInOutQuad(t);
+                    
+                    // Apply zoom
+                    zoom = lastZoom * Math.pow(zoomTarget, t);
+                    
+                    // End zoom animation when complete
+                    if (zoomProgress >= zoomDuration) {
+                        isZooming = false;
+                        needsFullRender = true;
+                    }
+                }
+                
+                // Handle gravity zoom
+                if (gravityZooming && !isDragging) {
+                    gravityTime += 1/60; // Assume 60fps for consistent motion
+                    
+                    // Physics-based zoom acceleration: d = 0.5 * g * t²
+                    let distance = 0.5 * G_CONSTANT * gravityTime * gravityTime;
+                    
+                    // Apply exponential zoom: 2^(distance/factor)
+                    zoom = initialZoom * Math.pow(2, distance / 3);
+                    
+                    // Periodically force full quality render during gravity zoom
+                    if (Math.floor(gravityTime * 2) > Math.floor((gravityTime - 1/60) * 2)) {
+                        renderLowQuality();
+                    }
+                }
+            }
+            
+            // === DISPLAY HANDLERS ===
+            function handleDragging() {
+                // Calculate displacement in complex plane coordinates
+                const dx = centerX - dragStartCenterX;
+                const dy = centerY - dragStartCenterY;
+                
+                // Calculate pixel displacement based on zoom
+                const plotWidth = 4.0 / lastZoom;
+                const pixelsPerUnit = p.width / plotWidth;
+                
+                // Offset the last good render based on drag
+                mainBuffer.copy(lowResBuffer, 0, 0, p.width, p.height, 
+                               Math.round(-dx * pixelsPerUnit), 
+                               Math.round(-dy * pixelsPerUnit), 
+                               p.width, p.height);
+            }
+            
+            function handleZooming() {
+                // Calculate scale factor between current zoom and last render
+                const scaleFactor = zoom / lastZoom;
+                
+                // Every 30 frames, refresh the low-res buffer
+                if (p.frameCount % 30 === 0) {
+                    renderLowQuality();
+                }
+                
+                // Scale from the center of the screen
+                const offsetX = (p.width / 2) * (1 - scaleFactor);
+                const offsetY = (p.height / 2) * (1 - scaleFactor);
+                
+                // Apply scaling to the low-res buffer
+                mainBuffer.clear();
+                mainBuffer.copy(lowResBuffer, 0, 0, p.width, p.height,
+                              offsetX, offsetY, 
+                              p.width * scaleFactor, 
+                              p.height * scaleFactor);
+            }
+            
+            function renderHighQuality() {
+                // Render at full quality
+                renderMandelbrot(mainBuffer, maxIterations, 1);
+                
+                // Update the low-res buffer with high quality render
+                lowResBuffer.copy(mainBuffer, 0, 0, p.width, p.height, 0, 0, p.width, p.height);
+                
+                // Update state tracking
+                lastZoom = zoom;
+                lastCenterX = centerX;
+                lastCenterY = centerY;
+                dragStartCenterX = centerX;
+                dragStartCenterY = centerY;
+                needsFullRender = false;
+            }
+            
+            function renderLowQuality() {
+                // Render at lower quality for interactive operations
+                renderMandelbrot(lowResBuffer, lowResIterations, 2);
+                
+                // Copy to main buffer
+                mainBuffer.copy(lowResBuffer, 0, 0, p.width, p.height, 0, 0, p.width, p.height);
+                
+                // Update state tracking
+                lastZoom = zoom;
+                lastCenterX = centerX;
+                lastCenterY = centerY;
+            }
+            
+            // Schedule a high-quality render after a delay
+            function scheduleHighQualityRender(delay = 100) {
+                if (renderDebounceTimer) {
+                    clearTimeout(renderDebounceTimer);
+                }
+                
+                renderDebounceTimer = setTimeout(() => {
+                    needsFullRender = true;
+                }, delay);
+            }
+            
+            // === MANDELBROT CALCULATION ===
+            function renderMandelbrot(buffer, iterations, sampleStep = 1) {
+                const startTime = performance.now();
+                
+                buffer.loadPixels();
+                
+                // Calculate range in complex plane
+                const aspectRatio = p.width / p.height;
+                const plotWidth = 4.0 / zoom;
+                const plotHeight = plotWidth / aspectRatio;
+                
+                // Calculate boundaries
+                const xMin = centerX - plotWidth / 2;
+                const yMin = centerY - plotHeight / 2;
+                const pixelSize = plotWidth / p.width;
+                
+                // Main calculation loop
+                for (let x = 0; x < p.width; x += sampleStep) {
+                    for (let y = 0; y < p.height; y += sampleStep) {
+                        // Convert pixel coordinate to complex plane
+                        const cReal = xMin + x * pixelSize;
+                        const cImag = yMin + y * pixelSize;
+                        
+                        // Calculate Mandelbrot iterations
+                        const iter = mandelbrotIterations(cReal, cImag, iterations);
+                        
+                        // Set pixel color
+                        const pix = (x + y * p.width) * 4;
+                        
+                        // Inside set = black
+                        if (iter === iterations) {
+                            buffer.pixels[pix] = 0;
+                            buffer.pixels[pix + 1] = 0;
+                            buffer.pixels[pix + 2] = 0;
+                            buffer.pixels[pix + 3] = 255;
+                        } 
+                        // Outside set = color based on escape speed
+                        else {
+                            const color = getColor(iter / iterations);
+                            buffer.pixels[pix] = color[0];
+                            buffer.pixels[pix + 1] = color[1];
+                            buffer.pixels[pix + 2] = color[2];
+                            buffer.pixels[pix + 3] = 255;
+                        }
+                        
+                        // Fill in skipped pixels for low-res rendering
+                        if (sampleStep > 1) {
+                            for (let dx = 0; dx < sampleStep && x + dx < p.width; dx++) {
+                                for (let dy = 0; dy < sampleStep && y + dy < p.height; dy++) {
+                                    if (dx === 0 && dy === 0) continue; // Skip original pixel
+                                    
+                                    const fillPix = ((x + dx) + (y + dy) * p.width) * 4;
+                                    buffer.pixels[fillPix] = buffer.pixels[pix];
+                                    buffer.pixels[fillPix + 1] = buffer.pixels[pix + 1];
+                                    buffer.pixels[fillPix + 2] = buffer.pixels[pix + 2];
+                                    buffer.pixels[fillPix + 3] = 255;
+                                }
+                            }
+                        }
+                    }
+                }
+                
+                buffer.updatePixels();
+                
+                // Record render time
+                renderTime = performance.now() - startTime;
+                uiElements.renderTimeSpan.textContent = Math.round(renderTime) + 'ms';
+            }
+            
+            function mandelbrotIterations(cReal, cImag, maxIter) {
+                // Early escape test: check if point is in main cardioid or period-2 bulb
+                if (isInMainCardioid(cReal, cImag) || isInPeriod2Bulb(cReal, cImag)) {
+                    return maxIter;
+                }
+                
+                // Initialize
+                let zReal = 0.0;
+                let zImag = 0.0;
+                let zReal2 = 0.0; // zReal^2
+                let zImag2 = 0.0; // zImag^2
+                let iter = 0;
+                
+                // Main iteration loop: z = z² + c
+                while (iter < maxIter && zReal2 + zImag2 < 4.0) {
+                    zImag = 2.0 * zReal * zImag + cImag;
+                    zReal = zReal2 - zImag2 + cReal;
+                    
+                    // Cache squares for next iteration
+                    zReal2 = zReal * zReal;
+                    zImag2 = zImag * zImag;
+                    
+                    iter++;
+                }
+                
+                // Smooth coloring using logarithmic scale
+                if (iter < maxIter) {
+                    const logZn = Math.log(zReal2 + zImag2) / 2;
+                    const nu = Math.log(logZn / Math.log(2)) / Math.log(2);
+                    iter = iter + 1 - nu;
+                }
+                
+                return iter;
+            }
+            
+            // Optimization: Test if point is in main cardioid (large stable region)
+            function isInMainCardioid(x, y) {
+                const q = (x - 0.25) * (x - 0.25) + y * y;
+                return q * (q + (x - 0.25)) < 0.25 * y * y;
+            }
+            
+            // Optimization: Test if point is in period-2 bulb (second large stable region)
+            function isInPeriod2Bulb(x, y) {
+                const p = (x + 1) * (x + 1) + y * y;
+                return p < 0.0625;
+            }
+            
+            // === COLOR GENERATION ===
+            function getColor(t) {
+                // For high iteration counts, use logarithmic scaling
+                const highIterMode = maxIterations > 1000;
+                
+                // Apply different color adjustments based on iteration count
+                const adjT = highIterMode ? 
+                    Math.log(1 + t * 20) / Math.log(21) : t;
+                
+                // Select color scheme
+                switch (colorScheme) {
+                    case 'rainbow': return getRainbowColor(adjT);
+                    case 'fire': return getFireColor(adjT);
+                    case 'ocean': return getOceanColor(adjT);
+                    case 'grayscale': return getGrayscaleColor(adjT);
+                    case 'electric': return getElectricColor(adjT);
+                    default: return getRainbowColor(adjT);
+                }
+            }
+            
+            function getRainbowColor(t) {
+                // Adapt color cycles based on zoom level
+                const cycles = Math.max(1, Math.min(5, Math.log10(zoom + 1)));
+                const hue = ((t * 360 * cycles) % 360);
+                return hsvToRgb(hue, 0.8, 1.0);
+            }
+            
+            function getFireColor(t) {
+                if (t < 0.3) {
+                    return [Math.floor(t / 0.3 * 255), 0, 0];
+                } else if (t < 0.7) {
+                    return [255, Math.floor((t - 0.3) / 0.4 * 255), 0];
+                } else {
+                    return [255, 255, Math.floor((t - 0.7) / 0.3 * 255)];
+                }
+            }
+            
+            function getOceanColor(t) {
+                if (t < 0.3) {
+                    return [0, 0, Math.floor(t / 0.3 * 255)];
+                } else if (t < 0.7) {
+                    return [0, Math.floor((t - 0.3) / 0.4 * 255), 255];
+                } else {
+                    return [Math.floor((t - 0.7) / 0.3 * 255), 255, 255];
+                }
+            }
+            
+            function getGrayscaleColor(t) {
+                const val = Math.floor(t * 255);
+                return [val, val, val];
+            }
+            
+            function getElectricColor(t) {
+                const hue = 240 + (t * 120);
+                return hsvToRgb(hue % 360, 0.8, 0.9);
+            }
+            
+            function hsvToRgb(h, s, v) {
+                const i = Math.floor(h / 60) % 6;
+                const f = h / 60 - Math.floor(h / 60);
+                const p = v * (1 - s);
+                const q = v * (1 - f * s);
+                const t = v * (1 - (1 - f) * s);
+                
+                let r, g, b;
+                switch (i) {
+                    case 0: r = v; g = t; b = p; break;
+                    case 1: r = q; g = v; b = p; break;
+                    case 2: r = p; g = v; b = t; break;
+                    case 3: r = p; g = q; b = v; break;
+                    case 4: r = t; g = p; b = v; break;
+                    case 5: r = v; g = p; b = q; break;
+                }
+                
+                return [Math.round(r * 255), Math.round(g * 255), Math.round(b * 255)];
+            }
+            
+            // === INTERACTION HANDLERS ===
+            p.mousePressed = function() {
+                // Ignore clicks on UI elements
+                if (p.mouseX < 320 && p.mouseY < 300) return;
+                if (p.mouseX < 200 && p.mouseY > p.height - 80) return;
+                
+                // Cancel any ongoing gravity zoom
+                if (gravityZooming) {
+                    gravityZooming = false;
+                    uiElements.toggleGravityButton.textContent = 'Start Gravity Zoom';
+                }
+                
+                // Start drag operation
+                isDragging = true;
+                dragStartX = p.mouseX;
+                dragStartY = p.mouseY;
+                dragStartCenterX = centerX;
+                dragStartCenterY = centerY;
+            };
+            
+            p.mouseReleased = function() {
+                if (!isDragging) return;
+                
+                // Check if this was a quick click (for zooming) or a drag
+                const dragDist = Math.sqrt(Math.pow(p.mouseX - dragStartX, 2) + 
+                                         Math.pow(p.mouseY - dragStartY, 2));
+                
+                // Handle as click (zoom) or drag (pan)
+                if (dragDist < 5) {
+                    if (p.mouseButton === p.LEFT) {
+                        startZoomIn(p.mouseX, p.mouseY);
+                    } else if (p.mouseButton === p.RIGHT) {
+                        startZoomOut(p.mouseX, p.mouseY);
+                    }
+                } else {
+                    // After dragging, schedule a high-quality render
+                    scheduleHighQualityRender();
+                }
+                
+                isDragging = false;
+            };
+            
+            p.mouseDragged = function() {
+                if (!isDragging) return;
+                
+                // Calculate displacement in pixels
+                const dx = p.mouseX - dragStartX;
+                const dy = p.mouseY - dragStartY;
+                
+                // Convert pixel displacement to complex plane displacement
+                const aspectRatio = p.width / p.height;
+                const plotWidth = 4.0 / zoom;
+                const plotHeight = plotWidth / aspectRatio;
+                
+                const dCenterX = -dx * (plotWidth / p.width);
+                const dCenterY = -dy * (plotHeight / p.height);
+                
+                // Apply displacement to center coordinates
+                centerX = dragStartCenterX + dCenterX;
+                centerY = dragStartCenterY + dCenterY;
+                
+                // Update UI with new coordinates
+                updateCoordinatesDisplay();
+            };
+            
+            // Start zooming in at the specified location
+            function startZoomIn(x, y) {
+                if (isZooming) return;
+                
+                // Convert screen coordinates to complex plane
+                const aspectRatio = p.width / p.height;
+                const plotWidth = 4.0 / zoom;
+                const plotHeight = plotWidth / aspectRatio;
+                
+                const newCenterX = centerX + (x - p.width/2) * plotWidth / p.width;
+                const newCenterY = centerY + (y - p.height/2) * plotHeight / p.height;
+                
+                // Set new center
+                centerX = newCenterX;
+                centerY = newCenterY;
+                
+                // Start zoom animation
+                lastZoom = zoom;
+                zoomTarget = 2.0;
+                zoomProgress = 0;
+                isZooming = true;
+            }
+            
+            // Start zooming out at the specified location
+            function startZoomOut(x, y) {
+                if (isZooming) return;
+                
+                // Convert screen coordinates to complex plane
+                const aspectRatio = p.width / p.height;
+                const plotWidth = 4.0 / zoom;
+                const plotHeight = plotWidth / aspectRatio;
+                
+                const newCenterX = centerX + (x - p.width/2) * plotWidth / p.width;
+                const newCenterY = centerY + (y - p.height/2) * plotHeight / p.height;
+                
+                // Set new center
+                centerX = newCenterX;
+                centerY = newCenterY;
+                
+                // Start zoom animation
+                lastZoom = zoom;
+                zoomTarget = 0.5;
+                zoomProgress = 0;
+                isZooming = true;
+            }
+            
+            // Handle window resize
+            p.windowResized = function() {
+                p.resizeCanvas(p.windowWidth, p.windowHeight);
+                
+                // Create new buffers at the new size
+                mainBuffer = p.createGraphics(p.width, p.height);
+                lowResBuffer = p.createGraphics(p.width, p.height);
+                
+                // Force full render with new dimensions
+                needsFullRender = true;
+            };
+            
+            // === UI MANAGEMENT ===
+            function setupUI() {
+                // Store references to DOM elements
+                uiElements = {
+                    maxIterationsSlider: document.getElementById('maxIterations'),
+                    maxIterationValue: document.getElementById('maxIterationValue'),
+                    zoomSpeedSlider: document.getElementById('zoomSpeed'),
+                    zoomSpeedValue: document.getElementById('zoomSpeedValue'),
+                    colorSelect: document.getElementById('colorScheme'),
+                    resetButton: document.getElementById('reset'),
+                    saveButton: document.getElementById('saveImage'),
+                    toggleGravityButton: document.getElementById('toggleGravity'),
+                    centerCoordSpan: document.getElementById('centerCoord'),
+                    zoomLevelSpan: document.getElementById('zoomLevel'),
+                    currentIterationsSpan: document.getElementById('currentIterations'),
+                    renderTimeSpan: document.getElementById('renderTime')
+                };
+                
+                // Set initial values
+                maxIterations = parseInt(uiElements.maxIterationsSlider.value);
+                zoomSpeed = parseInt(uiElements.zoomSpeedSlider.value);
+                zoomDuration = Math.floor(60 / zoomSpeed);
+                
+                // Add event listeners
+                uiElements.maxIterationsSlider.addEventListener('input', function() {
+                    maxIterations = parseInt(uiElements.maxIterationsSlider.value);
+                    uiElements.maxIterationValue.textContent = maxIterations;
+                    uiElements.currentIterationsSpan.textContent = maxIterations;
+                    
+                    // Higher iterations needs more adaptive lowResIterations
+                    lowResIterations = Math.max(20, Math.min(100, Math.floor(maxIterations / 10)));
+                    
+                    // Schedule a new render
+                    scheduleHighQualityRender(0);
+                });
+                
+                uiElements.zoomSpeedSlider.addEventListener('input', function() {
+                    zoomSpeed = parseInt(uiElements.zoomSpeedSlider.value);
+                    uiElements.zoomSpeedValue.textContent = zoomSpeed;
+                    zoomDuration = Math.floor(60 / zoomSpeed);
+                });
+                
+                uiElements.colorSelect.addEventListener('change', function() {
+                    colorScheme = uiElements.colorSelect.value;
+                    scheduleHighQualityRender(0);
+                });
+                
+                uiElements.resetButton.addEventListener('click', function() {
+                    // Reset all parameters to default
+                    centerX = -0.5;
+                    centerY = 0.0;
+                    zoom = 1.0;
+                    maxIterations = 250;
+                    
+                    // Update UI
+                    uiElements.maxIterationsSlider.value = maxIterations;
+                    uiElements.maxIterationValue.textContent = maxIterations;
+                    uiElements.currentIterationsSpan.textContent = maxIterations;
+                    uiElements.colorSelect.value = 'rainbow';
+                    colorScheme = 'rainbow';
+                    
+                    // Stop gravity zoom if active
+                    gravityZooming = false;
+                    uiElements.toggleGravityButton.textContent = 'Start Gravity Zoom';
+                    
+                    // Force a new render
+                    needsFullRender = true;
+                });
+                
+                uiElements.saveButton.addEventListener('click', function() {
+                    // Force high-quality render before saving
+                    renderMandelbrot(mainBuffer, maxIterations, 1);
+                    
+                    // Generate filename with coordinates
+                    const filename = 'mandelbrot_' + 
+                                    centerX.toFixed(6) + '_' + 
+                                    centerY.toFixed(6) + '_zoom_' + 
+                                    zoom.toFixed(2);
+                    
+                    p.saveCanvas(filename, 'png');
+                });
+                
+                uiElements.toggleGravityButton.addEventListener('click', function() {
+                    gravityZooming = !gravityZooming;
+                    
+                    if (gravityZooming) {
+                        // Start gravity zoom
+                        gravityTime = 0;
+                        initialZoom = zoom;
+                        uiElements.toggleGravityButton.textContent = 'Stop Gravity Zoom';
+                    } else {
+                        // Stop gravity zoom
+                        uiElements.toggleGravityButton.textContent = 'Start Gravity Zoom';
+                        scheduleHighQualityRender(0);
+                    }
+                });
+            }
+            
+            function updateCoordinatesDisplay() {
+                uiElements.centerCoordSpan.textContent = '(' + centerX.toFixed(8) + ', ' + centerY.toFixed(8) + ')';
+                uiElements.zoomLevelSpan.textContent = zoom.toFixed(2);
+                uiElements.currentIterationsSpan.textContent = maxIterations;
+            }
+            
+            // === UTILITY FUNCTIONS ===
+            function easeInOutQuad(t) {
+                return t < 0.5 ? 2 * t * t : 1 - Math.pow(-2 * t + 2, 2) / 2;
+            }
+        };
+        
+        // Create the sketch instance
+        new p5(sketch);
+    </script>
+</body>
+</html>
