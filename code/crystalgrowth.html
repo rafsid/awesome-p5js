@@ -1,0 +1,126 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Crystal Growth Simulator</title>
+    <style>
+        body {
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            height: 100vh;
+            margin: 0;
+            background-color: #f0f0f0;
+        }
+        canvas {
+            border: 1px solid #000;
+        }
+    </style>
+</head>
+<body>
+    <!-- Load the p5.js library from a CDN -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/p5.js/1.4.2/p5.min.js"></script>
+    
+    <!-- Crystal Growth Simulator p5.js sketch -->
+    <script>
+        let grid;
+        let particles = [];
+        let gridSize = 100; // Size of the grid (100x100 cells)
+        let cellSize = 5;   // Size of each cell in pixels
+        let numParticles = 1000; // Total number of particles to simulate
+
+        function setup() {
+            createCanvas(gridSize * cellSize, gridSize * cellSize);
+            grid = createGrid(gridSize);
+            // Place a seed crystal at the center
+            grid[Math.floor(gridSize / 2)][Math.floor(gridSize / 2)] = 1;
+            // Create initial particles
+            for (let i = 0; i < numParticles; i++) {
+                particles.push(createParticle());
+            }
+        }
+
+        function draw() {
+            background(255); // White background
+            // Update particles
+            for (let particle of particles) {
+                moveParticle(particle);
+                if (isAdjacentToCrystal(particle)) {
+                    grid[particle.x][particle.y] = 1; // Attach to crystal
+                    particle.attached = true;
+                }
+            }
+            // Remove attached particles
+            particles = particles.filter(p => !p.attached);
+            // Draw the grid
+            drawGrid();
+            // Stop when all particles are attached
+            if (particles.length === 0) {
+                noLoop();
+            }
+        }
+
+        function createGrid(size) {
+            let grid = new Array(size);
+            for (let i = 0; i < size; i++) {
+                grid[i] = new Array(size).fill(0);
+            }
+            return grid;
+        }
+
+        function createParticle() {
+            return {
+                x: Math.floor(random(gridSize)),
+                y: Math.floor(random(gridSize)),
+                attached: false
+            };
+        }
+
+        function moveParticle(particle) {
+            let direction = Math.floor(random(4));
+            switch (direction) {
+                case 0: // Up
+                    particle.y = (particle.y - 1 + gridSize) % gridSize;
+                    break;
+                case 1: // Down
+                    particle.y = (particle.y + 1) % gridSize;
+                    break;
+                case 2: // Left
+                    particle.x = (particle.x - 1 + gridSize) % gridSize;
+                    break;
+                case 3: // Right
+                    particle.x = (particle.x + 1) % gridSize;
+                    break;
+            }
+        }
+
+        function isAdjacentToCrystal(particle) {
+            let x = particle.x;
+            let y = particle.y;
+            if (x > 0 && grid[x - 1][y] === 1) return true; // Left
+            if (x < gridSize - 1 && grid[x + 1][y] === 1) return true; // Right
+            if (y > 0 && grid[x][y - 1] === 1) return true; // Up
+            if (y < gridSize - 1 && grid[x][y + 1] === 1) return true; // Down
+            return false;
+        }
+
+        function drawGrid() {
+            // Draw crystal cells (black)
+            for (let i = 0; i < gridSize; i++) {
+                for (let j = 0; j < gridSize; j++) {
+                    if (grid[i][j] === 1) {
+                        fill(0);
+                        rect(i * cellSize, j * cellSize, cellSize, cellSize);
+                    }
+                }
+            }
+            // Draw moving particles (red)
+            fill(255, 0, 0);
+            for (let particle of particles) {
+                rect(particle.x * cellSize, particle.y * cellSize, cellSize, cellSize);
+            }
+        }
+    </script>
+</body>
+</html>
