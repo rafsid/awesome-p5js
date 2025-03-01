@@ -1,0 +1,282 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Fish School Simulation</title>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/p5.js/1.4.0/p5.min.js"></script>
+  <style>
+    body {
+      margin: 0;
+      padding: 0;
+      overflow: hidden;
+      background-color: #003366;
+    }
+  </style>
+</head>
+<body>
+  <script>
+    let fishes = [];
+    const FISH_COUNT = 300;
+    const MAX_SPEED = 3;
+    const MAX_FORCE = 0.05;
+    
+    // Distance thresholds for different behaviors
+    const SEPARATION_RADIUS = 25;
+    const ALIGNMENT_RADIUS = 50;
+    const COHESION_RADIUS = 50;
+    const WALL_AVOIDANCE_RADIUS = 50;
+    
+    // Weights for different behaviors
+    const SEPARATION_WEIGHT = 1.5;
+    const ALIGNMENT_WEIGHT = 1.0;
+    const COHESION_WEIGHT = 1.0;
+    const WALL_AVOIDANCE_WEIGHT = 1.7;
+    
+    function setup() {
+      createCanvas(windowWidth, windowHeight);
+      
+      // Create fish
+      for (let i = 0; i < FISH_COUNT; i++) {
+        fishes.push(new Fish(
+          random(width),
+          random(height),
+          random(-MAX_SPEED, MAX_SPEED),
+          random(-MAX_SPEED, MAX_SPEED)
+        ));
+      }
+    }
+    
+    function draw() {
+      background('#003366');
+      
+      // Draw each fish and update its position
+      for (let fish of fishes) {
+        fish.flock(fishes);
+        fish.update();
+        fish.display();
+      }
+    }
+    
+    class Fish {
+      constructor(x, y, vx, vy) {
+        this.position = createVector(x, y);
+        this.velocity = createVector(vx, vy);
+        this.acceleration = createVector(0, 0);
+        this.size = random(4, 8);
+        
+        // Give each fish a slightly different color
+        this.r = random(100, 200);
+        this.g = random(150, 255);
+        this.b = random(200, 255);
+      }
+      
+      flock(fishes) {
+        // Calculate flocking behaviors
+        let separation = this.separate(fishes);
+        let alignment = this.align(fishes);
+        let cohesion = this.cohesion(fishes);
+        let wallAvoidance = this.avoidWalls();
+        
+        // Apply weights to behaviors
+        separation.mult(SEPARATION_WEIGHT);
+        alignment.mult(ALIGNMENT_WEIGHT);
+        cohesion.mult(COHESION_WEIGHT);
+        wallAvoidance.mult(WALL_AVOIDANCE_WEIGHT);
+        
+        // Apply forces to acceleration
+        this.acceleration.add(separation);
+        this.acceleration.add(alignment);
+        this.acceleration.add(cohesion);
+        this.acceleration.add(wallAvoidance);
+      }
+      
+      update() {
+        // Update velocity with acceleration
+        this.velocity.add(this.acceleration);
+        
+        // Limit speed
+        this.velocity.limit(MAX_SPEED);
+        
+        // Update position
+        this.position.add(this.velocity);
+        
+        // Reset acceleration
+        this.acceleration.mult(0);
+      }
+      
+      display() {
+        // Calculate rotation angle
+        let angle = this.velocity.heading() + PI/2;
+        
+        push();
+        translate(this.position.x, this.position.y);
+        rotate(angle);
+        
+        // Draw fish body
+        fill(this.r, this.g, this.b, 200);
+        noStroke();
+        
+        // Draw fish body (teardrop shape)
+        beginShape();
+        vertex(0, -this.size * 2);
+        bezierVertex(
+          this.size, -this.size,
+          this.size, this.size,
+          0, this.size * 2
+        );
+        bezierVertex(
+          -this.size, this.size,
+          -this.size, -this.size,
+          0, -this.size * 2
+        );
+        endShape(CLOSE);
+        
+        // Draw tail
+        fill(this.r, this.g, this.b, 150);
+        triangle(
+          0, this.size * 2,
+          -this.size, this.size * 3,
+          this.size, this.size * 3
+        );
+        
+        pop();
+      }
+      
+      separate(fishes) {
+        let steer = createVector(0, 0);
+        let count = 0;
+        
+        // Look at each fish
+        for (let other of fishes) {
+          let d = p5.Vector.dist(this.position, other.position);
+          
+          // If it's too close, move away
+          if (d > 0 && d < SEPARATION_RADIUS) {
+            let diff = p5.Vector.sub(this.position, other.position);
+            diff.normalize();
+            diff.div(d); // Weight by distance
+            steer.add(diff);
+            count++;
+          }
+        }
+        
+        // Average
+        if (count > 0) {
+          steer.div(count);
+        }
+        
+        // Apply Reynolds' steering formula
+        if (steer.mag() > 0) {
+          steer.normalize();
+          steer.mult(MAX_SPEED);
+          steer.sub(this.velocity);
+          steer.limit(MAX_FORCE);
+        }
+        
+        return steer;
+      }
+      
+      align(fishes) {
+        let sum = createVector(0, 0);
+        let count = 0;
+        
+        // Look at each fish
+        for (let other of fishes) {
+          let d = p5.Vector.dist(this.position, other.position);
+          
+          // If it's within alignment radius, align with it
+          if (d > 0 && d < ALIGNMENT_RADIUS) {
+            sum.add(other.velocity);
+            count++;
+          }
+        }
+        
+        if (count > 0) {
+          sum.div(count);
+          sum.normalize();
+          sum.mult(MAX_SPEED);
+          
+          // Steer towards desired direction
+          let steer = p5.Vector.sub(sum, this.velocity);
+          steer.limit(MAX_FORCE);
+          return steer;
+        } else {
+          return createVector(0, 0);
+        }
+      }
+      
+      cohesion(fishes) {
+        let sum = createVector(0, 0);
+        let count = 0;
+        
+        // Look at each fish
+        for (let other of fishes) {
+          let d = p5.Vector.dist(this.position, other.position);
+          
+          // If it's within cohesion radius, move toward it
+          if (d > 0 && d < COHESION_RADIUS) {
+            sum.add(other.position);
+            count++;
+          }
+        }
+        
+        if (count > 0) {
+          sum.div(count);
+          
+          // Steer towards center of neighbors
+          return this.seek(sum);
+        } else {
+          return createVector(0, 0);
+        }
+      }
+      
+      seek(target) {
+        // Steer towards target
+        let desired = p5.Vector.sub(target, this.position);
+        desired.normalize();
+        desired.mult(MAX_SPEED);
+        
+        let steer = p5.Vector.sub(desired, this.velocity);
+        steer.limit(MAX_FORCE);
+        return steer;
+      }
+      
+      avoidWalls() {
+        let desired = null;
+        let steer = createVector(0, 0);
+        
+        // Left wall
+        if (this.position.x < WALL_AVOIDANCE_RADIUS) {
+          desired = createVector(MAX_SPEED, this.velocity.y);
+          steer.add(p5.Vector.sub(desired, this.velocity).limit(MAX_FORCE).mult(map(this.position.x, 0, WALL_AVOIDANCE_RADIUS, 2, 0)));
+        }
+        
+        // Right wall
+        if (this.position.x > width - WALL_AVOIDANCE_RADIUS) {
+          desired = createVector(-MAX_SPEED, this.velocity.y);
+          steer.add(p5.Vector.sub(desired, this.velocity).limit(MAX_FORCE).mult(map(this.position.x, width, width - WALL_AVOIDANCE_RADIUS, 2, 0)));
+        }
+        
+        // Top wall
+        if (this.position.y < WALL_AVOIDANCE_RADIUS) {
+          desired = createVector(this.velocity.x, MAX_SPEED);
+          steer.add(p5.Vector.sub(desired, this.velocity).limit(MAX_FORCE).mult(map(this.position.y, 0, WALL_AVOIDANCE_RADIUS, 2, 0)));
+        }
+        
+        // Bottom wall
+        if (this.position.y > height - WALL_AVOIDANCE_RADIUS) {
+          desired = createVector(this.velocity.x, -MAX_SPEED);
+          steer.add(p5.Vector.sub(desired, this.velocity).limit(MAX_FORCE).mult(map(this.position.y, height, height - WALL_AVOIDANCE_RADIUS, 2, 0)));
+        }
+        
+        return steer;
+      }
+    }
+    
+    function windowResized() {
+      resizeCanvas(windowWidth, windowHeight);
+    }
+  </script>
+</body>
+</html>
